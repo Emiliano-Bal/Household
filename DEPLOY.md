@@ -33,20 +33,49 @@ folder directly, no GitHub repo needed. The git+GitHub path is recommended
 anyway since it gives you auto-deploys on every push — this runbook assumes
 that path from here on.)
 
-## 1. Create the Supabase project and get BOTH connection strings
+## 1. Create the Supabase project and get the right connection strings
 
 In the Supabase dashboard: open your project, then **Connect** (top bar) or
 **Project Settings → Database**. You'll see several connection string
-variants — you need two specific ones, and it matters which goes where:
+variants. Three of them matter here, and it matters which goes where:
 
-| Which one | Where in Supabase's UI | Port | Used for |
-|---|---|---|---|
-| **Direct connection** | Tab labeled "Direct connection" | `5432` | Running `prisma migrate deploy` — DDL (`ALTER TABLE`, etc.) needs a real, unpooled session. |
-| **Transaction pooler** | Tab labeled "Transaction pooler" (this is Supavisor, their PgBouncer-compatible pooler, in **transaction** mode) | `6543` | The deployed app's runtime queries on Vercel. |
+| Which one | Host / port | Used for |
+|---|---|---|
+| **Direct connection** | `db.<ref>.supabase.co:5432` | Migrations — **but only from a network with IPv6**, see below. |
+| **Session pooler** | `<region>.pooler.supabase.com:5432` | Migrations from an IPv4-only network. This is what we actually used. |
+| **Transaction pooler** | `<region>.pooler.supabase.com:6543` | The deployed app's runtime queries on Vercel. |
 
-Both look like `postgresql://postgres.<project-ref>:<password>@<host>:<port>/postgres`
-— only the host/port differ between the two tabs. Copy both now; you'll use
-the direct one in step 2 and the pooled one in step 4.
+They all look like `postgresql://postgres[.<project-ref>]:<password>@<host>:<port>/postgres`
+— mainly the host and port differ.
+
+### The direct (5432) host is IPv6-only — this bit us
+
+`db.<ref>.supabase.co` publishes an **AAAA record and no A record**. Without
+Supabase's paid IPv4 add-on, a machine on an IPv4-only network cannot reach
+it at all. This machine is one of those: it has only a ULA (`fdf0:…`)
+address, no globally routable IPv6, and a TCP probe to the direct host times
+out. Check your own network before trusting the direct string:
+
+```bash
+dig +short db.<ref>.supabase.co A        # empty output  => IPv6-only host
+nc -6 -z -w 8 db.<ref>.supabase.co 5432  # fails         => use session pooler
+```
+
+So the migration in step 2 went through the **session pooler** instead:
+port `5432` on the *pooler* host. That is the correct substitute, not a
+workaround — session mode pins one real Postgres connection for the life of
+the client, so `ALTER TABLE` and the rest of the DDL behave exactly as on a
+direct connection. (Transaction mode, port `6543`, is the one that can tear
+a DDL session out from under you; don't migrate through that.)
+
+### Percent-encode special characters in the password
+
+Anything outside `A-Za-z0-9-._~` must be percent-encoded in the URL. The
+common ones: `$`→`%24`, `@`→`%40`, `#`→`%23`, `/`→`%2F`, `:`→`%3A`,
+`?`→`%3F`, `&`→`%26`, `%`→`%25`. Both `node-postgres` and Prisma URL-decode
+the password, so the encoded form is what they want. Also wrap the whole URL
+in **single** quotes in the shell — inside double quotes, a `$` starts a
+variable expansion and your password silently loses characters.
 
 Do **not** use the direct (5432) string for the deployed app's `DATABASE_URL`
 — Supabase's direct connection limit is small (tens of connections), and a
@@ -75,9 +104,11 @@ isn't encoded in the code — it's just "which value you put in which
 `DATABASE_URL`, in which place," and that place differs for you locally vs.
 Vercel:
 
-- **Your local `.env`**, when you run the migration → the **direct**
-  (5432) string.
-- **Vercel's env var**, for the running app → the **pooled** (6543) string.
+- **Your shell**, when you run the migration → the **session pooler**
+  (`...pooler.supabase.com:5432`) string. The direct string would also be
+  correct here if your network had IPv6; it doesn't, see step 1.
+- **Vercel's env var**, for the running app → the **transaction pooler**
+  (`...pooler.supabase.com:6543`) string.
 
 Don't let that bleed together — your laptop's `.env` currently points at
 `docker-compose.yml`'s local container; swap it only for this one step and
@@ -85,32 +116,49 @@ put it back (or just use a separate shell export instead of editing `.env`,
 so you can't forget to revert it):
 
 ```bash
-DATABASE_URL="<the Supabase DIRECT 5432 string>" npx prisma migrate deploy
+# Session pooler (port 5432 on the POOLER host) — works on IPv4.
+# Single quotes matter: the password contains a '$'.
+DATABASE_URL='postgresql://postgres.<ref>:<encoded-password>@<region>.pooler.supabase.com:5432/postgres' \
+  npx prisma migrate deploy
 ```
 
 Expected output: a list of migration names applying in order, ending in
-`All migrations have been successfully applied.` Confirm it against the real
-Supabase DB, not just the exit code:
+`All migrations have been successfully applied.`
 
-```bash
-DATABASE_URL="<same direct string>" npx prisma studio
+**Status: done.** Both migrations applied cleanly on 2026-10-10:
+`20261008195806_init` and
+`20261008203100_add_income_source_default_and_fallback_warning_types`.
+Verified against the real database — not just the exit code — through
+*both* pooler ports, which also pre-flights the runtime string Vercel will
+use:
+
+```
+tables: Category, Expense, ExpenseShare, Household, IncomeRecord, Member,
+        RecurringExpense, SavingsContribution, SavingsGoal, Settlement,
+        _prisma_migrations
+both migrations: finished_at set (not left half-applied)
+Household row count: 0   (clean, unseeded)
 ```
 
-and check the tables exist (Household, Member, Expense, Settlement, etc.) —
-or query however you prefer. **Do not run `db:seed` against this database**
+`npx prisma studio` with the same URL is the interactive way to eyeball the
+same thing. **Do not run `db:seed` against this database**
 — that script is fixture data for local dev, not something you want in a
 real deployment (see step 5 for how real households get created instead).
 
 ## 3. Push the code
 
-```bash
-git add -A
-git commit -m "Add deploy tooling"
-git push
-```
+**Status: already done.** `origin/main` is level with local `main`
+(`git rev-list --left-right --count origin/main...HEAD` -> `0  0`) and the
+tree is clean, so the committed `package.json` already carries the
+`postinstall: "prisma generate"` script Vercel's build needs. Nothing to
+push before importing.
 
-(This picks up the `postinstall: "prisma generate"` script I just added to
-`package.json` — see step 4 note.)
+A local production build was also run against the real Supabase database
+(through the 6543 pooled string) as a dry run of what Vercel will do:
+TypeScript clean, all 7 app routes compiled, every one of them `f`
+(server-rendered on demand) -- so nothing tries to reach the database at
+build time, and a bad `DATABASE_URL` can only ever surface as a runtime 500,
+never as a failed build.
 
 ## 4. Import into Vercel and set env vars
 
@@ -123,7 +171,19 @@ Vercel project and add exactly one:
 
 | Name | Value | Environments |
 |---|---|---|
-| `DATABASE_URL` | the Supabase **pooled** (6543, transaction mode) string from step 1 | Production, Preview, Development (all three, so preview deploys work too) |
+| `DATABASE_URL` | the Supabase **transaction pooler** string -- `postgresql://postgres.<ref>:<encoded-password>@<region>.pooler.supabase.com:6543/postgres` | Production, Preview, Development (all three, so preview deploys work too) |
+
+Paste the value with the password **percent-encoded** exactly as in step 2's
+command. Vercel's env var UI stores it literally -- no shell is involved, so
+there is nothing to quote, but the percent-encoding is still required
+because the consumer is a URL parser. Use the `6543` port here, not the
+`5432` session pooler you migrated with: the app wants transaction-mode
+pooling, which is what survives many short-lived serverless invocations.
+
+This string has already been smoke-tested from here: it connects, and it can
+read the migrated schema. So if the deploy 500s, the string itself is not the
+suspect -- check that you set it for the **Production** environment
+specifically.
 
 That's the only env var this app currently reads (confirm: `grep -rn "process.env" src/` only turns up `DATABASE_URL` in `src/lib/db.ts`). There is no `DIRECT_URL` to set on Vercel — Vercel never runs migrations, only the already-migrated app.
 
@@ -176,6 +236,15 @@ of your original ask closes; until that's built, treat the deployed URL as
 
 ## Troubleshooting quick reference
 
+- **Migration hangs, then `connect ETIMEDOUT` / `ENETUNREACH` against
+  `db.<ref>.supabase.co`** → that host is IPv6-only and your network is
+  IPv4-only. Not a credentials problem, and not a firewall problem on your
+  end. Use the session pooler (`<region>.pooler.supabase.com:5432`) instead,
+  per step 1. Confirm with `dig +short db.<ref>.supabase.co A` returning
+  nothing at all.
+- **`password authentication failed` with a password that has symbols in
+  it** → percent-encoding, or double quotes eating a `$`. Re-read step 1's
+  encoding note before you start suspecting the password itself.
 - **Build fails with Prisma client errors** → check `postinstall` ran; look
   at the build log for a `prisma generate` line before `next build` starts.
 - **500s on every page, logs mention connection refused/timeout** → almost

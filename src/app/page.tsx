@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { listHouseholds } from "@/lib/queries";
-import { createHousehold } from "@/lib/actions";
+import { CreateHouseholdForm } from "@/components/create-household-form";
 
 // Always reads the live household list — never prerender this statically.
 export const dynamic = "force-dynamic";
@@ -42,32 +42,7 @@ export default async function HomePage() {
 
       <section className="flex flex-col gap-3 border-t border-slate-200 pt-6">
         <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Create a household</h2>
-        <form
-          action={async (formData: FormData) => {
-            "use server";
-            const name = String(formData.get("name") ?? "").trim();
-            if (!name) return;
-            // No currency field: every amount in the app renders EUR/es-ES
-            // regardless of what's stored here (see src/lib/money.ts).
-            const household = await createHousehold(name);
-            const { redirect } = await import("next/navigation");
-            redirect(`/h/${household.id}`);
-          }}
-          className="flex gap-2"
-        >
-          <input
-            name="name"
-            placeholder="e.g. Nano & Shelle"
-            required
-            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-          />
-          <button
-            type="submit"
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-700"
-          >
-            Create
-          </button>
-        </form>
+        <CreateHouseholdForm />
       </section>
     </main>
   );
