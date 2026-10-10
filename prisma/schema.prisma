@@ -1,0 +1,226 @@
+// Household budget planner — schema per the domain spec.
+//
+// Money: every amount is stored as an Int of minor currency units (cents).
+// Never store a float for money. The app layer converts to/from Decimal
+// (see src/lib/money.ts) right at the boundary — DB and UI both talk in
+// cents, only display formatting introduces decimal points.
+//
+// Months: stored as DateTime normalized to the 1st of the month at
+// midnight UTC (see src/lib/month.ts: monthKey/monthStart). This keeps
+// range queries (">= month") simple and avoids ad-hoc "YYYY-MM" string
+// parsing scattered across the app.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma 7 removed the `url` field here — the connection string for
+// Migrate/Studio lives in prisma.config.ts, and the runtime PrismaClient
+// gets it via an explicit driver adapter (see src/lib/db.ts).
+datasource db {
+  provider = "postgresql"
+}
+
+enum CategoryKind {
+  FIXED
+  VARIABLE
+  SAVINGS
+}
+
+model Household {
+  id           String   @id @default(cuid())
+  name         String
+  baseCurrency String   @default("USD")
+  createdAt    DateTime @default(now())
+
+  members           Member[]
+  categories        Category[]
+  expenses          Expense[]
+  recurringExpenses RecurringExpense[]
+  savingsGoals      SavingsGoal[]
+  settlements       Settlement[]
+}
+
+model Member {
+  id          String    @id @default(cuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  name        String
+  email       String?
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  incomeRecords         IncomeRecord[]
+  expensesPaid          Expense[]             @relation("ExpensePayer")
+  expenseShares         ExpenseShare[]
+  recurringExpensesPaid RecurringExpense[]    @relation("RecurringPayer")
+  savingsContributions  SavingsContribution[]
+  settlementsFrom       Settlement[]          @relation("SettlementFrom")
+  settlementsTo         Settlement[]          @relation("SettlementTo")
+
+  @@index([householdId])
+}
+
+// Net monthly take-home. More than one row per member/month is allowed
+// (e.g. salary + freelance) — netIncome(member, month) sums them all.
+model IncomeRecord {
+  id        String   @id @default(cuid())
+  memberId  String
+  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  month     DateTime
+  netAmount Int
+  // Non-nullable with a default rather than String? — Postgres treats
+  // NULL as distinct from NULL in a unique index, which let two
+  // no-source rows for the same member/month slip past the constraint
+  // below. Defaulting instead of allowing null closes that hole: two
+  // unlabeled income records for the same member/month both resolve to
+  // "General" and collide for real.
+  source    String   @default("General")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Covers (memberId) and (memberId, month) prefix queries too, so the
+  // old plain @@index([memberId, month]) is now redundant.
+  @@unique([memberId, month, source])
+}
+
+model Category {
+  id          String       @id @default(cuid())
+  householdId String
+  household   Household    @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  name        String
+  kind        CategoryKind
+
+  recurringExpenses RecurringExpense[]
+  expenses          Expense[]
+
+  @@index([householdId])
+}
+
+// A template that "generate this month" materializes into real Expense
+// rows. splitRule is a SplitRule JSON value (see src/lib/splitting.ts).
+model RecurringExpense {
+  id             String    @id @default(cuid())
+  householdId    String
+  household      Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  categoryId     String
+  category       Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  label          String
+  amount         Int
+  dayOfMonth     Int
+  startMonth     DateTime
+  endMonth       DateTime?
+  paidByMemberId String
+  paidBy         Member    @relation("RecurringPayer", fields: [paidByMemberId], references: [id])
+  splitRule      Json
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  expenses Expense[]
+
+  @@index([categoryId])
+  @@index([householdId])
+}
+
+model Expense {
+  id          String    @id @default(cuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  date        DateTime
+  label       String
+  amount      Int
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+
+  paidByMemberId String
+  paidBy         Member @relation("ExpensePayer", fields: [paidByMemberId], references: [id])
+
+  // SplitRule JSON (see src/lib/splitting.ts) — the rule actually used to
+  // produce `shares` below.
+  splitRule Json
+  isShared  Boolean @default(true)
+
+  // Set only on expenses materialized from a recurring template.
+  recurringExpenseId String?
+  recurringExpense   RecurringExpense? @relation(fields: [recurringExpenseId], references: [id])
+  // Normalized to the 1st of the month this expense was generated for.
+  // Paired with recurringExpenseId in a unique constraint so "generate
+  // this month" can never double-materialize the same recurring expense
+  // for the same month, no matter how many times it's clicked.
+  generatedForMonth  DateTime?
+
+  // The per-member income ratios in effect on `date`, frozen at write
+  // time for PROPORTIONAL splits — e.g. {"mem_a": 0.6, "mem_b": 0.4}.
+  // Display/audit only; the authoritative money values are the
+  // ExpenseShare rows below. Editing income later must not silently
+  // change those rows — see src/lib/income-edit-impact.ts.
+  incomeRatioSnapshot Json?
+
+  shares ExpenseShare[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([recurringExpenseId, generatedForMonth])
+  @@index([householdId, date])
+}
+
+// Materialized at write time: one row per member with a share in this
+// expense. Rows sum exactly to Expense.amount (see src/lib/splitting.ts —
+// remainder cents are allocated deterministically, never dropped).
+model ExpenseShare {
+  id         String  @id @default(cuid())
+  expenseId  String
+  expense    Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  memberId   String
+  member     Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  owedAmount Int
+
+  @@unique([expenseId, memberId])
+  @@index([memberId])
+}
+
+model SavingsGoal {
+  id           String    @id @default(cuid())
+  householdId  String
+  household    Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  name         String
+  targetAmount Int
+  targetDate   DateTime?
+  createdAt    DateTime  @default(now())
+
+  contributions SavingsContribution[]
+
+  @@index([householdId])
+}
+
+model SavingsContribution {
+  id       String      @id @default(cuid())
+  goalId   String
+  goal     SavingsGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  memberId String
+  member   Member      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  month    DateTime
+  amount   Int
+  isJoint  Boolean     @default(false)
+
+  @@index([goalId])
+  @@index([memberId])
+}
+
+// A real-money transfer between two members that reduces their balance.
+// Never read by spending/expense reports — only by the balance engine.
+model Settlement {
+  id           String    @id @default(cuid())
+  householdId  String
+  household    Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  fromMemberId String
+  fromMember   Member    @relation("SettlementFrom", fields: [fromMemberId], references: [id])
+  toMemberId   String
+  toMember     Member    @relation("SettlementTo", fields: [toMemberId], references: [id])
+  amount       Int
+  date         DateTime  @default(now())
+  note         String?
+
+  @@index([householdId])
+}

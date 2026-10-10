@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Household Budget Planner</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="authScreen" class="auth-screen">
+    <div class="auth-wrap">
+      <div class="auth-card">
+        <div class="auth-logo">
+          <span class="logo-mark">HB</span>
+          <span class="logo-text">Household Budget</span>
+        </div>
+
+        <div class="auth-header">
+          <span class="section-label">Welcome</span>
+          <h2>Sign in</h2>
+        </div>
+
+        <div class="auth-form">
+          <div class="input-wrap auth-field">
+            <label for="authHouseholdName">Household name</label>
+            <input id="authHouseholdName" type="text" autocomplete="off" />
+          </div>
+          <div class="input-wrap auth-field">
+            <label for="authPassword">Password</label>
+            <input id="authPassword" type="password" autocomplete="off" />
+          </div>
+          <div class="auth-actions">
+            <button class="primary-button" id="signInButton">Sign In</button>
+            <button class="secondary-button" id="createHouseholdButton">Create Household</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section id="setupScreen" class="setup-screen hidden">
+    <div class="setup-wrap">
+      <div class="setup-card">
+        <div class="setup-head">
+          <div>
+            <span class="section-label">Create household</span>
+            <h2>Household setup</h2>
+          </div>
+          <button class="icon-button small-icon" id="backToSignIn">
+            <svg viewBox="0 0 24 24" class="icon small">
+              <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg>
+          </button>
+        </div>
+
+        <form id="setupForm" class="setup-form">
+          <div class="setup-basic-grid">
+            <div class="input-wrap">
+              <label for="householdNameSetup">Household name</label>
+              <input id="householdNameSetup" type="text" required />
+            </div>
+            <div class="input-wrap">
+              <label for="passwordSetup">Password</label>
+              <input id="passwordSetup" type="password" required />
+            </div>
+            <div class="input-wrap">
+              <label for="personCount">Number of persons</label>
+              <input id="personCount" type="number" min="1" value="1" required />
+            </div>
+          </div>
+
+          <div class="person-section">
+            <div class="section-row">
+              <span class="section-label">People</span>
+              <button class="secondary-button compact-button" id="addPersonButton" type="button">Add person</button>
+            </div>
+            <div id="peopleRows" class="people-rows"></div>
+          </div>
+
+          <div class="fixed-cost-section">
+            <div class="section-row">
+              <span class="section-label">Fixed costs</span>
+              <button class="secondary-button compact-button" id="addFixedCostButton" type="button">Add fixed cost</button>
+            </div>
+            <div id="fixedCostsRows" class="fixed-cost-rows"></div>
+          </div>
+
+          <div class="budget-saving-section">
+            <div class="section-row">
+              <span class="section-label">Budget and savings</span>
+              <button class="secondary-button compact-button" id="addBudgetButton" type="button">Add budget</button>
+            </div>
+            <div id="budgetRows" class="budget-rows"></div>
+            <div class="input-wrap savings-wrap">
+              <label for="savingsTarget">Savings target</label>
+              <input id="savingsTarget" type="number" min="0" value="0" />
+            </div>
+            <div class="input-wrap shared-expense-wrap">
+              <label for="sharedExpenseMethod">Shared expenses paid by</label>
+              <select id="sharedExpenseMethod" required>
+                <option value="equal" selected>Equal parts (50/50)</option>
+                <option value="yearlyIncome">Based on yearly income</option>
+                <option value="monthlyIncome">Based on monthly income</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="setup-actions">
+            <button class="secondary-button" id="clearSetup" type="button">Clear</button>
+            <button class="primary-button" id="saveHousehold" type="submit">Save household</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <section id="dashboardScreen" class="dashboard-screen hidden">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg viewBox="0 0 24 24" class="icon">
+              <path d="M4 7h16v4H4zM4 13h16v4H4zM4 19h10v4H4z" />
+            </svg>
+          </div>
+          <div>
+            <span class="brand-kicker">Household</span>
+            <h1 id="householdTitle">Budget Planner</h1>
+          </div>
+        </div>
+
+        <div class="profile-card">
+          <div class="avatar-wrap">
+            <div class="avatar avatar-one">A</div>
+            <div class="avatar avatar-two">B</div>
+          </div>
+          <div class="profile-text">
+            <span class="date-label" id="dashboardDate">September 2026</span>
+            <span class="profile-name" id="householdNameDisplay">Family Budget</span>
+          </div>
+        </div>
+
+        <nav class="main-nav" id="mainNav">
+          <a class="nav-link active" href="#">
+            <svg viewBox="0 0 24 24" class="icon small">
+              <path d="M3 13h8l4-8 4 16 2-6h4" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg>
+            Dashboard
+          </a>
+        </nav>
+
+        <div class="household-card">
+          <div class="household-title">
+            <span>Household Split</span>
+            <span class="status-dot"></span>
+          </div>
+          <div class="household-list" id="householdMembers"></div>
+        </div>
+
+        <div class="sidebar-footer">
+          <button class="primary-button compact" id="sidebarAddExpense">
+            <svg viewBox="0 0 24 24" class="icon small">
+              <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg>
+            Add Expense
+          </button>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <section class="topbar">
+          <div>
+            <span class="section-label">Monthly Planning</span>
+            <h2>Budget Dashboard</h2>
+          </div>
+          <div class="topbar-actions">
+            <button class="icon-button">
+              <svg viewBox="0 0 24 24" class="icon small">
+                <path d="M5 12h14M12 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" />
+              </svg>
+            </button>
+            <button class="secondary-button" id="editHouseholdButton">Edit household</button>
+            <button class="primary-button" id="addIncomeButton">
+              <svg viewBox="0 0 24 24" class="icon small">
+                <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" />
+              </svg>
+              Add income
+            </button>
+          </div>
+        </section>
+
+        <section class="summary-grid">
+          <article class="summary-card income-card">
+            <div class="summary-card-head">
+              <span class="summary-label">Net Income</span>
+              <span class="summary-icon green-bg">
+                <svg viewBox="0 0 24 24" class="icon small">
+                  <path d="M12 3a9 9 0 1 0 9 9" fill="none" stroke="currentColor" stroke-width="2" />
+                  <path d="M16 8h5V3" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </span>
+            </div>
+            <div class="summary-value" id="incomeTotal">$0.00</div>
+            <div class="summary-meta">
+              <span class="trend positive">+ Base salary + earnings</span>
+            </div>
+          </article>
+
+          <article class="summary-card">
+            <div class="summary-card-head">
+              <span class="summary-label">Fixed Expenses</span>
+              <span class="summary-icon orange-bg">
+                <svg viewBox="0 0 24 24" class="icon small">
+                  <path d="M4 7h16v4H4zM4 13h16v4H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </span>
+            </div>
+            <div class="summary-value" id="expensesTotal">$0.00</div>
+            <div class="summary-meta">
+              <span class="trend neutral">Base monthly needs</span>
+            </div>
+          </article>
+
+          <article class="summary-card">
+            <div class="summary-card-head">
+              <span class="summary-label">Budgets</span>
+              <span class="summary-icon violet-bg">
+                <svg viewBox="0 0 24 24" class="icon small">
+                  <path d="M4 6h16v12H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                  <path d="M4 18h16" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </span>
+            </div>
+            <div class="summary-value" id="budgetTotal">$0.00</div>
+            <div class="summary-meta">
+              <span class="trend positive">Lifestyle and extras</span>
+            </div>
+          </article>
+
+          <article class="summary-card savings-card">
+            <div class="summary-card-head">
+              <span class="summary-label">Available</span>
+              <span class="summary-icon blue-bg">
+                <svg viewBox="0 0 24 24" class="icon small">
+                  <path d="M3 8h18v8H3z" fill="none" stroke="currentColor" stroke-width="2" />
+                  <path d="M8 19h8" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </span>
+            </div>
+            <div class="summary-value" id="availableTotal">$0.00</div>
+            <div class="summary-meta">
+              <span class="trend positive">Cash available</span>
+            </div>
+          </article>
+        </section>
+
+        <section class="grid-two">
+          <section class="panel large-panel">
+            <div class="panel-head">
+              <div>
+                <span class="section-label small-label">Cash Flow</span>
+                <h3>Monthly Planner</h3>
+              </div>
+              <div class="panel-actions">
+                <button class="icon-button">
+                  <svg viewBox="0 0 24 24" class="icon small">
+                    <path d="M6 18L18 6M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" />
+                  </svg>
+                </button>
+                <button class="icon-button">
+                  <svg viewBox="0 0 24 24" class="icon small">
+                    <path d="M4 12h7l3-7 2 14 3-7h4" fill="none" stroke="currentColor" stroke-width="2" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="chart-card">
+              <div class="chart-header">
+                <span class="chart-label">Budget Allocation</span>
+                <span class="chart-date" id="chartMonth">Sep 2026</span>
+              </div>
+              <div class="chart-area">
+                <div class="bar-wrap">
+                  <div class="bar-row">
+                    <span class="bar-label">Income</span>
+                    <div class="bar-track">
+                      <div class="bar-fill income-fill" id="incomeBar"></div>
+                    </div>
+                    <span class="bar-value" id="incomeBarValue">$0</span>
+                  </div>
+                  <div class="bar-row">
+                    <span class="bar-label">Expenses</span>
+                    <div class="bar-track">
+                      <div class="bar-fill expense-fill" id="expenseBar"></div>
+                    </div>
+                    <span class="bar-value" id="expenseBarValue">$0</span>
+                  </div>
+                  <div class="bar-row">
+                    <span class="bar-label">Budget</span>
+                    <div class="bar-track">
+                      <div class="bar-fill budget-fill" id="budgetBar"></div>
+                    </div>
+                    <span class="bar-value" id="budgetBarValue">$0</span>
+                  </div>
+                  <div class="bar-row">
+                    <span class="bar-label">Savings</span>
+                    <div class="bar-track">
+                      <div class="bar-fill savings-fill" id="savingsBar"></div>
+                    </div>
+                    <span class="bar-value" id="savingsBarValue">$0</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="insights-grid">
+              <div class="insight-item">
+                <span class="insight-kicker">Monthly total</span>
+                <span class="insight-value" id="totalIncomeLabel">$0.00</span>
+              </div>
+              <div class="insight-item">
+                <span class="insight-kicker">Savings target</span>
+                <span class="insight-value" id="savingsTargetLabel">$0.00</span>
+              </div>
+              <div class="insight-item">
+                <span class="insight-kicker">Available</span>
+                <span class="insight-value afford-label" id="availableAfterLabel">$0.00</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span class="section-label small-label">Priorities</span>
+                <h3>Planner Goals</h3>
+              </div>
+              <button class="icon-button small-icon">
+                <svg viewBox="0 0 24 24" class="icon small">
+                  <path d="M12 3l8 8-8 8-8-8z" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </button>
+            </div>
+
+            <div class="goal-list">
+              <div class="goal-item">
+                <div class="goal-icon savings-icon">
+                  <svg viewBox="0 0 24 24" class="icon small">
+                    <path d="M3 12h7l4-8 4 16 2-6h4" fill="none" stroke="currentColor" stroke-width="2" />
+                  </svg>
+                </div>
+                <div class="goal-content">
+                  <span class="goal-label">Savings goal</span>
+                  <span class="goal-value" id="savingsPercent">0%</span>
+                  <div class="progress-track">
+                    <div class="progress-fill savings-progress" id="savingsProgress"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="goal-item">
+                <div class="goal-icon budget-icon">
+                  <svg viewBox="0 0 24 24" class="icon small">
+                    <path d="M4 7h16v4H4zM4 13h16v4H4z" fill="none" stroke="currentColor" stroke-width="2" />
+                  </svg>
+                </div>
+                <div class="goal-content">
+                  <span class="goal-label">Budget used</span>
+                  <span class="goal-value" id="budgetUsed">0%</span>
+                  <div class="progress-track">
+                    <div class="progress-fill budget-progress" id="budgetProgress"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="goal-item">
+                <div class="goal-icon expense-icon">
+                  <svg viewBox="0 0 24 24" class="icon small">
+                    <path d="M4 19h16" fill="none" stroke="currentColor" stroke-width="2" />
+                    <path d="M6 15l4-4 4 4 4-7" fill="none" stroke="currentColor" stroke-width="2" />
+                  </svg>
+                </div>
+                <div class="goal-content">
+                  <span class="goal-label">Fixed costs</span>
+                  <span class="goal-value" id="expenseRatio">0%</span>
+                  <div class="progress-track">
+                    <div class="progress-fill expense-progress" id="expenseProgress"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="afford-card">
+              <span class="afford-label">Affordability</span>
+              <div class="afford-score-wrap">
+                <div class="afford-score" id="affordScore">High</div>
+                <div class="afford-copy" id="affordMessage">You can afford your planned budget.</div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="current-month-section">
+          <section class="current-month-panel panel" id="currentMonthSection">
+            <div class="panel-head">
+              <div>
+                <span class="section-label small-label">Current month</span>
+                <h3>Current month</h3>
+              </div>
+            </div>
+
+            <div class="current-month-content">
+              <div class="current-month-column">
+                <div class="current-month-column-head">
+                  <span class="current-month-column-title">Monthly income</span>
+                  <button class="secondary-button compact-button current-month-add-button" id="currentMonthAddIncome">
+                    <svg viewBox="0 0 24 24" class="icon small">
+                      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" />
+                    </svg>
+                    Add income
+                  </button>
+                </div>
+                <div class="current-month-list" id="currentMonthIncomeList">
+                  <div class="current-month-list-row">
+                    <span class="current-month-list-label">Month fixed income</span>
+                    <span class="current-month-list-value" id="currentMonthIncome">$0.00</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="current-month-column">
+                <div class="current-month-column-head">
+                  <span class="current-month-column-title">Expenses</span>
+                  <button class="secondary-button compact-button current-month-add-button" id="currentMonthAddExpense">
+                    <svg viewBox="0 0 24 24" class="icon small">
+                      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" />
+                    </svg>
+                    Add expense
+                  </button>
+                </div>
+                <div class="current-month-list current-month-expense-list" id="currentMonthExpenseList">
+                  <div class="current-month-list-row">
+                    <span class="current-month-list-label">No fixed costs yet</span>
+                    <button class="current-month-action-button" data-add-fixed>+ Add</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="current-month-summary">
+              <div class="current-month-summary-item">
+                <span class="current-month-summary-label">Expenses paid</span>
+                <span class="current-month-summary-value" id="currentMonthPaid">$0.00</span>
+              </div>
+              <div class="current-month-summary-item">
+                <span class="current-month-summary-label">Available left</span>
+                <span class="current-month-summary-value" id="currentMonthLeft">$0.00</span>
+              </div>
+            </div>
+
+            <div class="current-month-modal hidden" id="currentMonthPrompt">
+              <div class="current-month-modal-card">
+                <div class="current-month-modal-head">
+                  <div>
+                    <span class="section-label small-label">Add item</span>
+                    <h3 id="currentMonthPromptTitle">Add current month item</h3>
+                  </div>
+                  <button class="icon-button small-icon" id="currentMonthPromptClose" type="button">
+                    <svg viewBox="0 0 24 24" class="icon small">
+                      <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="current-month-modal-form">
+                  <div class="input-wrap">
+                    <label for="currentMonthPromptName">Name</label>
+                    <input id="currentMonthPromptName" type="text" autocomplete="off" />
+                  </div>
+                  <div class="input-wrap">
+                    <label for="currentMonthPromptAmount">Amount</label>
+                    <input id="currentMonthPromptAmount" type="number" min="0" value="0" />
+                  </div>
+                  <div class="current-month-modal-actions">
+                    <button class="secondary-button" id="currentMonthPromptCancel" type="button">Cancel</button>
+                    <button class="primary-button" id="currentMonthPromptSave" type="button">Save</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="tabs-row">
+          <div class="tab-strip">
+            <button class="tab-button active" data-view="income">Income</button>
+            <button class="tab-button" data-view="expenses">Expenses</button>
+            <button class="tab-button" data-view="budgets">Budgets</button>
+            <button class="tab-button" data-view="savings">Savings</button>
+          </div>
+          <button class="primary-button add-button" id="jumpToAddItemButton" type="button">
+            <svg viewBox="0 0 24 24" class="icon small">
+              <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" />
+            </svg>
+            Add item
+          </button>
+        </section>
+
+        <section class="data-panel">
+          <div class="data-panel-head">
+            <div>
+              <span class="section-label small-label">Plan Details</span>
+              <h3 id="dataTitle">Monthly income</h3>
+            </div>
+            <div class="panel-actions">
+              <button class="icon-button small-icon">
+                <svg viewBox="0 0 24 24" class="icon small">
+                  <path d="M4 19h16" fill="none" stroke="currentColor" stroke-width="2" />
+                  <path d="M7 15l3-3 3 3 4-7" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </button>
+              <button class="primary-button small-button">
+                <svg viewBox="0 0 24 24" class="icon small">
+                  <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+                New
+              </button>
+            </div>
+          </div>
+
+          <div class="table-holder">
+            <table class="budget-table" id="budgetTable">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Type</th>
+                  <th>Effective</th>
+                  <th>Owner</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="two-column-lower">
+          <section class="panel small-panel">
+            <div class="panel-head compact-panel-head">
+              <div>
+                <span class="section-label small-label">Expense Map</span>
+                <h3>Fixed Costs</h3>
+              </div>
+              <button class="icon-button small-icon">
+                <svg viewBox="0 0 24 24" class="icon small">
+                  <path d="M5 12h14M12 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </button>
+            </div>
+            <div class="category-list" id="expenseList"></div>
+          </section>
+
+          <section class="panel small-panel">
+            <div class="panel-head compact-panel-head">
+              <div>
+                <span class="section-label small-label">Budget Tones</span>
+                <h3>Discretionary</h3>
+              </div>
+              <button class="icon-button small-icon">
+                <svg viewBox="0 0 24 24" class="icon small">
+                  <path d="M12 3a9 9 0 1 0 9 9" fill="none" stroke="currentColor" stroke-width="2" />
+                  <path d="M12 7h.01M8.5 12l2.5 2.5L15.5 7" fill="none" stroke="currentColor" stroke-width="2" />
+                </svg>
+              </button>
+            </div>
+            <div class="category-list" id="budgetList"></div>
+          </section>
+        </section>
+
+        <section class="trackers-section">
+          <div class="section-row">
+            <span class="section-label">Per-person savings &amp; credit card debt</span>
+          </div>
+          <!-- dashboard.js renders one savings + one credit-card panel per
+               household member here; see renderPersonTrackers(). -->
+          <div class="two-column-lower" id="personTrackers"></div>
+        </section>
+
+        <section class="form-panel">
+          <div class="panel-head">
+            <div>
+              <span class="section-label small-label">Plan Input</span>
+              <h3>Add to your budget</h3>
+            </div>
+            <div class="form-actions">
+              <button class="secondary-button" id="clearDashboardPlan">Clear</button>
+              <button class="primary-button small-button">Save Plan</button>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="input-wrap">
+              <label for="incomeSource">Income source</label>
+              <input id="incomeSource" type="text" placeholder="Bonus" />
+            </div>
+            <div class="input-wrap">
+              <label for="incomeAmount">Amount</label>
+              <input id="incomeAmount" type="number" placeholder="250" />
+            </div>
+            <div class="input-wrap">
+              <label for="incomeDate">Effective date</label>
+              <input id="incomeDate" type="date" />
+            </div>
+            <div class="input-wrap">
+              <label for="incomeOwner">Owner</label>
+              <!-- dashboard.js repopulates this with the household's real
+                   members on every render; see populateMemberSelect(). -->
+              <select id="incomeOwner">
+                <option value="shared" selected>Shared</option>
+              </select>
+            </div>
+            <div class="input-wrap full">
+              <label for="expenseSource">Expense / Budget item</label>
+              <input id="expenseSource" type="text" placeholder="Rent" />
+            </div>
+            <div class="input-wrap">
+              <label for="expenseType">Category</label>
+              <select id="expenseType">
+                <option value="expense" selected>Expense</option>
+                <option value="budget">Budget</option>
+                <option value="savings">Savings</option>
+              </select>
+            </div>
+            <div class="input-wrap">
+              <label for="expenseAmount">Amount</label>
+              <input id="expenseAmount" type="number" placeholder="145" />
+            </div>
+            <div class="input-wrap">
+              <label for="expenseOwner">Owner</label>
+              <select id="expenseOwner">
+                <option value="shared" selected>Shared</option>
+              </select>
+            </div>
+            <div class="input-wrap">
+              <label for="expensePaidBy">Paid by</label>
+              <select id="expensePaidBy">
+                <option value="shared" selected>Shared</option>
+              </select>
+            </div>
+            <div class="input-wrap">
+              <label for="expenseSplitPercent">Split % (for Paid by, if shared)</label>
+              <input id="expenseSplitPercent" type="number" min="1" max="99" placeholder="Auto" />
+            </div>
+          </div>
+
+          <div class="form-submit">
+            <button class="primary-button add-button" id="addPlanButton">
+              <svg viewBox="0 0 24 24" class="icon small">
+                <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" />
+              </svg>
+              Add to plan
+            </button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </section>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
