@@ -210,7 +210,21 @@ export default async function ExpensesPage({
         <CategoryQuickAdd householdId={householdId} />
       </div>
 
-      <ExpenseForm householdId={householdId} members={members} categories={categories} defaultMonth={month} />
+      {/* Every expense needs a payer, so with no members the form below
+          renders but can never submit — say so instead of letting the
+          "Paid by" dropdown just sit there empty. */}
+      {members.length === 0 ? (
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Add a household member before recording expenses — every expense has to be attributed to
+          whoever paid it. You can add members from the{" "}
+          <Link href={`/h/${householdId}`} className="font-medium underline">
+            Dashboard
+          </Link>
+          .
+        </p>
+      ) : (
+        <ExpenseForm householdId={householdId} members={members} categories={categories} defaultMonth={month} />
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createRecurringExpense } from "@/lib/actions";
 import { monthKey } from "@/lib/month";
+import { CategorySelect, type CategoryOption } from "@/components/category-select";
 
 type SplitType = "PROPORTIONAL" | "EQUAL" | "EXACT" | "PERCENTAGE" | "SOLO";
 
@@ -14,7 +15,7 @@ export function RecurringForm({
 }: {
   householdId: string;
   members: { id: string; name: string }[];
-  categories: { id: string; name: string }[];
+  categories: CategoryOption[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -77,14 +78,7 @@ export function RecurringForm({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <input name="label" placeholder="Label (e.g. Rent)" required className={inputClass} />
         <input name="amount" type="number" step="0.01" min="0.01" placeholder="Amount" required className={inputClass} />
-        <select name="categoryId" required className={inputClass}>
-          <option value="">Category</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        <CategorySelect categories={categories} placeholder="Category" required className={inputClass} />
         <input name="dayOfMonth" type="number" min={1} max={31} defaultValue={1} placeholder="Day of month" className={inputClass} />
       </div>
 

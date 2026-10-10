@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createExpense } from "@/lib/actions";
 import { monthKey } from "@/lib/month";
+import { CategorySelect, type CategoryOption } from "@/components/category-select";
 
 type SplitType = "PROPORTIONAL" | "EQUAL" | "EXACT" | "PERCENTAGE" | "SOLO";
 
@@ -11,11 +12,6 @@ interface MemberOption {
   id: string;
   name: string;
 }
-interface CategoryOption {
-  id: string;
-  name: string;
-}
-
 export function ExpenseForm({
   householdId,
   members,
@@ -101,14 +97,7 @@ export function ExpenseForm({
         <input name="label" placeholder="Label (e.g. Rent)" required className={inputClass} />
         <input name="amount" type="number" step="0.01" min="0.01" placeholder="Amount" required className={inputClass} />
         <input name="date" type="date" defaultValue={defaultDate} className={inputClass} />
-        <select name="categoryId" className={inputClass}>
-          <option value="">No category</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        <CategorySelect categories={categories} placeholder="No category" className={inputClass} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

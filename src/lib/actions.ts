@@ -8,6 +8,7 @@ import { buildStoredIncomeRatioSnapshot, computeExpenseShares, previewSettlement
 import { computeHouseholdBalancesMap } from "./queries";
 import { findIncomeEditImpact, findSettlementImpact, type SettlementImpact } from "./income-impact";
 import { materializeRecurringExpense, recurringExpensesDueForMonth } from "./recurring";
+import { DEFAULT_CATEGORIES } from "./default-categories";
 import {
   createExpenseSchema,
   updateExpenseSchema,
@@ -39,7 +40,12 @@ async function membersAndIncomeFor(householdId: string) {
 // it as a user-editable choice would be misleading. See the actions.ts
 // history / README for the full note on this.
 export async function createHousehold(name: string, baseCurrency = "EUR") {
-  const household = await prisma.household.create({ data: { name, baseCurrency } });
+  // Seed the starter categories in the same insert: a household with no
+  // categories renders an expense form whose category dropdown has nothing
+  // in it but "No category", which reads as broken.
+  const household = await prisma.household.create({
+    data: { name, baseCurrency, categories: { create: DEFAULT_CATEGORIES } },
+  });
   revalidatePath("/");
   return household;
 }
