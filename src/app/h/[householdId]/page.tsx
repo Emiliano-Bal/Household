@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getDashboardData, getHousehold, getBalances } from "@/lib/queries";
 import { describeBalance, formatCents, formatPercent } from "@/lib/money";
-import { monthStart } from "@/lib/month";
+import { monthStart, monthKey } from "@/lib/month";
 import { MonthNav } from "@/components/month-nav";
 import { RecordSettlementButton } from "@/components/record-settlement-button";
 import { MemberQuickAdd } from "@/components/household-setup";
@@ -111,7 +111,14 @@ export default async function DashboardPage({
           <tbody>
             {dashboard.perMember.map((m) => (
               <tr key={m.memberId} className="border-t border-slate-100">
-                <td className="px-5 py-3 font-medium text-slate-800">{m.name}</td>
+                <td className="px-5 py-3 font-medium">
+                  <Link
+                    href={`/h/${householdId}/m/${m.memberId}?month=${monthKey(month)}`}
+                    className="text-slate-800 underline decoration-slate-300 underline-offset-2 hover:text-emerald-700 hover:decoration-emerald-400"
+                  >
+                    {m.name}
+                  </Link>
+                </td>
                 <td className="px-5 py-3 text-slate-600">
                   {formatCents(m.incomeCents)} ({formatPercent(m.incomeSharePercent)})
                 </td>
@@ -164,12 +171,18 @@ export default async function DashboardPage({
         <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Household members</h2>
         <ul className="mt-2 flex flex-wrap gap-2 text-sm">
           {household.members.map((m) => (
-            <li
-              key={m.id}
-              className={`rounded-full px-3 py-1 ${m.active ? "bg-slate-100 text-slate-700" : "bg-slate-50 text-slate-400"}`}
-            >
-              {m.name}
-              {!m.active && " (inactive)"}
+            <li key={m.id}>
+              <Link
+                href={`/h/${householdId}/m/${m.id}?month=${monthKey(month)}`}
+                className={`block rounded-full px-3 py-1 transition ${
+                  m.active
+                    ? "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                    : "bg-slate-50 text-slate-400 hover:bg-slate-100"
+                }`}
+              >
+                {m.name}
+                {!m.active && " (inactive)"}
+              </Link>
             </li>
           ))}
         </ul>

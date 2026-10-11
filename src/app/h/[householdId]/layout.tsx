@@ -1,15 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getHousehold } from "@/lib/queries";
-
-const NAV_ITEMS = [
-  { href: "", label: "Dashboard" },
-  { href: "/expenses", label: "Expenses" },
-  { href: "/recurring", label: "Recurring" },
-  { href: "/income", label: "Income" },
-  { href: "/savings", label: "Savings" },
-  { href: "/settle-up", label: "Settle Up" },
-];
+import { HouseholdNav } from "@/components/household-nav";
 
 export default async function HouseholdLayout({
   children,
@@ -37,17 +29,10 @@ export default async function HouseholdLayout({
             {household.members.filter((m) => m.active).length === 1 ? "" : "s"}
           </div>
         </div>
-        <nav className="mx-auto flex max-w-5xl gap-1 px-6">
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.label}
-              href={`/h/${householdId}${item.href}`}
-              className="rounded-t-md px-4 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
+        <HouseholdNav
+          householdId={householdId}
+          members={household.members.map((m) => ({ id: m.id, name: m.name, active: m.active }))}
+        />
       </header>
       <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
     </div>

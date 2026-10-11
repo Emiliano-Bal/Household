@@ -1,4 +1,5 @@
 import Decimal from "decimal.js";
+import type { CategoryKind } from "@prisma/client";
 import { prisma } from "./db";
 import { computeBalances, computeIncomeShares, simplifySettlements, type SplitRule } from "./splitting";
 import { monthStart, addMonths } from "./month";
@@ -256,6 +257,171 @@ export async function getDashboardData(householdId: string, month: Date): Promis
       fallbackMonth: w.fallbackMonth,
     })),
     usedEqualSplitFallback,
+  };
+}
+
+export interface MemberDashboardData {
+  member: { id: string; name: string; email: string | null; active: boolean };
+  month: Date;
+  /** This member's row out of getDashboardData().perMember — same numbers the household Dashboard shows, not a second derivation of them. */
+  summary: DashboardData["perMember"][number];
+  /** Their fair share of this month's spending, split by category kind. Sums to summary.fairContributionCents. */
+  shareByKind: { fixedCents: number; variableCents: number; savingsCents: number; uncategorizedCents: number };
+  /** Income rows for this month only — the raw records, not the fallback-resolved figure in `summary.incomeCents`. An empty list with a non-zero summary.incomeCents means a prior month was carried forward. */
+  incomeRecords: Array<{ id: string; source: string; netAmountCents: number }>;
+  /** Every expense this member owes a share of this month, with their slice of it. */
+  shares: Array<{
+    expenseId: string;
+    date: Date;
+    label: string;
+    categoryName: string | null;
+    categoryKind: CategoryKind | null;
+    totalCents: number;
+    owedCents: number;
+    paidByName: string;
+    paidByThisMember: boolean;
+    isShared: boolean;
+  }>;
+  /** Expenses this member paid for this month but owes no share of (a SOLO expense covering someone else). Kept separate so `shares` can stay "what I owe". */
+  paidWithoutShare: Array<{ expenseId: string; date: Date; label: string; totalCents: number }>;
+  /** Transfers involving this member, newest first, across all months — balances are cumulative, so scoping these to one month would misrepresent them. */
+  settlements: Array<{ id: string; date: Date; direction: "paid" | "received"; counterpartName: string; amountCents: number; note: string | null }>;
+  savingsContributions: Array<{ id: string; goalName: string; amountCents: number; isJoint: boolean }>;
+}
+
+/**
+ * One member's view of a month. Aggregates are taken from
+ * getDashboardData rather than recomputed: computeIncomeShares is the only
+ * place prior-month income fallback is resolved, and a second
+ * implementation here would be free to drift from the household Dashboard
+ * and disagree with it about the same member's numbers.
+ */
+export async function getMemberDashboardData(
+  householdId: string,
+  memberId: string,
+  month: Date
+): Promise<MemberDashboardData | null> {
+  const start = monthStart(month);
+  const end = addMonths(start, 1);
+
+  const member = await prisma.member.findFirst({
+    where: { id: memberId, householdId },
+    select: { id: true, name: true, email: true, active: true },
+  });
+  if (!member) return null;
+
+  const [dashboard, incomeRecords, monthExpenses, settlements, contributions] = await Promise.all([
+    getDashboardData(householdId, start),
+    prisma.incomeRecord.findMany({
+      where: { memberId, month: start },
+      select: { id: true, source: true, netAmount: true },
+      orderBy: { source: "asc" },
+    }),
+    prisma.expense.findMany({
+      where: { householdId, date: { gte: start, lt: end } },
+      select: {
+        id: true,
+        date: true,
+        label: true,
+        amount: true,
+        isShared: true,
+        paidByMemberId: true,
+        paidBy: { select: { name: true } },
+        category: { select: { name: true, kind: true } },
+        shares: { select: { memberId: true, owedAmount: true } },
+      },
+      orderBy: { date: "desc" },
+    }),
+    prisma.settlement.findMany({
+      where: { householdId, OR: [{ fromMemberId: memberId }, { toMemberId: memberId }] },
+      select: {
+        id: true,
+        date: true,
+        amount: true,
+        note: true,
+        fromMemberId: true,
+        fromMember: { select: { name: true } },
+        toMember: { select: { name: true } },
+      },
+      orderBy: { date: "desc" },
+    }),
+    prisma.savingsContribution.findMany({
+      where: { memberId, month: start },
+      select: { id: true, amount: true, isJoint: true, goal: { select: { name: true } } },
+    }),
+  ]);
+
+  // An inactive member is excluded from getDashboardData's perMember (it
+  // only queries active ones), so there is no row to show them.
+  const summary =
+    dashboard.perMember.find((m) => m.memberId === memberId) ??
+    {
+      memberId,
+      name: member.name,
+      incomeCents: 0,
+      incomeSharePercent: 0,
+      fairContributionCents: 0,
+      actuallyPaidCents: 0,
+      thisMonthBalanceCents: 0,
+      balanceCents: 0,
+    };
+
+  const shareByKind = { fixedCents: 0, variableCents: 0, savingsCents: 0, uncategorizedCents: 0 };
+  const shares: MemberDashboardData["shares"] = [];
+  const paidWithoutShare: MemberDashboardData["paidWithoutShare"] = [];
+
+  for (const expense of monthExpenses) {
+    const own = expense.shares.find((sh) => sh.memberId === memberId);
+    if (own) {
+      if (expense.category?.kind === "FIXED") shareByKind.fixedCents += own.owedAmount;
+      else if (expense.category?.kind === "SAVINGS") shareByKind.savingsCents += own.owedAmount;
+      else if (expense.category?.kind === "VARIABLE") shareByKind.variableCents += own.owedAmount;
+      else shareByKind.uncategorizedCents += own.owedAmount;
+
+      shares.push({
+        expenseId: expense.id,
+        date: expense.date,
+        label: expense.label,
+        categoryName: expense.category?.name ?? null,
+        categoryKind: expense.category?.kind ?? null,
+        totalCents: expense.amount,
+        owedCents: own.owedAmount,
+        paidByName: expense.paidBy.name,
+        paidByThisMember: expense.paidByMemberId === memberId,
+        isShared: expense.isShared,
+      });
+    } else if (expense.paidByMemberId === memberId) {
+      paidWithoutShare.push({
+        expenseId: expense.id,
+        date: expense.date,
+        label: expense.label,
+        totalCents: expense.amount,
+      });
+    }
+  }
+
+  return {
+    member,
+    month: start,
+    summary,
+    shareByKind,
+    incomeRecords: incomeRecords.map((r) => ({ id: r.id, source: r.source, netAmountCents: r.netAmount })),
+    shares,
+    paidWithoutShare,
+    settlements: settlements.map((st) => ({
+      id: st.id,
+      date: st.date,
+      direction: st.fromMemberId === memberId ? ("paid" as const) : ("received" as const),
+      counterpartName: st.fromMemberId === memberId ? st.toMember.name : st.fromMember.name,
+      amountCents: st.amount,
+      note: st.note,
+    })),
+    savingsContributions: contributions.map((c) => ({
+      id: c.id,
+      goalName: c.goal.name,
+      amountCents: c.amount,
+      isJoint: c.isJoint,
+    })),
   };
 }
 
