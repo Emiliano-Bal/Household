@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createRecurringExpense } from "@/lib/actions";
+import { createRecurringExpense, updateRecurringExpense } from "@/lib/actions";
 import { monthKey } from "@/lib/month";
 import { CategorySelect, type CategoryOption } from "@/components/category-select";
 
@@ -17,20 +17,52 @@ const INTERVAL_UNIT: Record<Frequency, string> = {
   YEARLY: "year(s)",
 };
 
+export interface EditingRecurring {
+  id: string;
+  label: string;
+  amountCents: number;
+  categoryId: string;
+  frequency: Frequency;
+  interval: number;
+  dayOfMonth: number | null;
+  dayOfWeek: number | null;
+  /** "YYYY-MM". */
+  startMonth: string;
+  endMonth: string | null;
+  paidByMemberId: string;
+  splitType: SplitType;
+  exactAmountsCents: Record<string, number>;
+  percentages: Record<string, number>;
+}
+
 export function RecurringForm({
   householdId,
   members,
   categories,
+  editingRule,
+  onCancelEdit,
 }: {
   householdId: string;
   members: { id: string; name: string }[];
   categories: CategoryOption[];
+  editingRule?: EditingRecurring | null;
+  onCancelEdit?: () => void;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [splitType, setSplitType] = useState<SplitType>("PROPORTIONAL");
-  const [paidBy, setPaidBy] = useState(members[0]?.id ?? "");
-  const [frequency, setFrequency] = useState<Frequency>("MONTHLY");
+  const [splitType, setSplitType] = useState<SplitType>(editingRule?.splitType ?? "PROPORTIONAL");
+  const [paidBy, setPaidBy] = useState(editingRule?.paidByMemberId ?? members[0]?.id ?? "");
+  const [frequency, setFrequency] = useState<Frequency>(editingRule?.frequency ?? "MONTHLY");
+  const isEditing = Boolean(editingRule);
+
+  // Re-seed the controlled fields when the edited rule changes.
+  const [lastEditedId, setLastEditedId] = useState(editingRule?.id ?? null);
+  if ((editingRule?.id ?? null) !== lastEditedId) {
+    setLastEditedId(editingRule?.id ?? null);
+    setSplitType(editingRule?.splitType ?? "PROPORTIONAL");
+    setPaidBy(editingRule?.paidByMemberId ?? members[0]?.id ?? "");
+    setFrequency(editingRule?.frequency ?? "MONTHLY");
+  }
   const [error, setError] = useState<string | null>(null);
   const defaultStartMonth = `${monthKey(new Date())}-01`;
   // Weekly rules are placed by weekday; the rest by day of month. Showing
@@ -66,7 +98,7 @@ export function RecurringForm({
 
     startTransition(async () => {
       try {
-        await createRecurringExpense({
+        const payload = {
           householdId,
           categoryId,
           label,
@@ -79,7 +111,23 @@ export function RecurringForm({
           endMonth: endMonthRaw ? new Date(endMonthRaw) : null,
           paidByMemberId: paidBy,
           splitRule: splitRule as never,
-        });
+        };
+
+        if (editingRule) {
+          // Only the rule changes. Expenses it already generated are left
+          // alone — repricing settled history because a template changed
+          // is exactly what this app avoids everywhere else.
+          const result = await updateRecurringExpense({ ...payload, id: editingRule.id });
+          if (!result.ok) {
+            setError(result.error);
+            return;
+          }
+          router.refresh();
+          onCancelEdit?.();
+          return;
+        }
+
+        await createRecurringExpense(payload);
         router.refresh();
         (document.getElementById("recurring-form") as HTMLFormElement | null)?.reset();
       } catch (err) {
@@ -90,13 +138,51 @@ export function RecurringForm({
 
   return (
     <form id="recurring-form" action={onSubmit} className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-5">
-      <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">New recurring expense</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">
+          {isEditing ? `Edit “${editingRule!.label}”` : "New recurring expense"}
+        </h2>
+        {isEditing && onCancelEdit && (
+          <button type="button" onClick={onCancelEdit} className="text-xs text-slate-400 hover:text-slate-600">
+            Cancel edit
+          </button>
+        )}
+      </div>
+      {isEditing && (
+        <p className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          Changes apply to future generations only. Expenses this rule has already created keep the amount, date and
+          split they were created with.
+        </p>
+      )}
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <input name="label" placeholder="Label (e.g. Rent)" required className={inputClass} />
-        <input name="amount" type="number" step="0.01" min="0.01" placeholder="Amount" required className={inputClass} />
-        <CategorySelect categories={categories} placeholder="Category" required className={inputClass} />
+        <input
+          name="label"
+          placeholder="Label (e.g. Rent)"
+          required
+          aria-label="Label"
+          defaultValue={editingRule?.label}
+          className={inputClass}
+        />
+        <input
+          name="amount"
+          type="number"
+          step="0.01"
+          min="0.01"
+          placeholder="Amount"
+          required
+          aria-label="Amount"
+          defaultValue={editingRule ? (editingRule.amountCents / 100).toFixed(2) : undefined}
+          className={inputClass}
+        />
+        <CategorySelect
+          categories={categories}
+          placeholder="Category"
+          required
+          defaultValue={editingRule?.categoryId}
+          className={inputClass}
+        />
         <select
           name="frequency"
           value={frequency}
@@ -115,7 +201,7 @@ export function RecurringForm({
         {isWeekly ? (
           <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
             Day of week
-            <select name="dayOfWeek" defaultValue={1} aria-label="Day of week" className={inputClass}>
+            <select name="dayOfWeek" defaultValue={editingRule?.dayOfWeek ?? 1} aria-label="Day of week" className={inputClass}>
               {WEEKDAYS.map((d, i) => (
                 <option key={d} value={i}>
                   {d}
@@ -131,7 +217,7 @@ export function RecurringForm({
               type="number"
               min={1}
               max={31}
-              defaultValue={1}
+              defaultValue={editingRule?.dayOfMonth ?? 1}
               aria-label="Day of month"
               className={inputClass}
             />
@@ -145,7 +231,7 @@ export function RecurringForm({
               type="number"
               min={1}
               max={52}
-              defaultValue={1}
+              defaultValue={editingRule?.interval ?? 1}
               aria-label="Repeat interval"
               className={`${inputClass} w-20`}
             />
@@ -157,7 +243,7 @@ export function RecurringForm({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
           Starts
-          <input name="startMonth" type="month" defaultValue={monthKey(new Date())} aria-label="Start month" className={inputClass} />
+          <input name="startMonth" type="month" defaultValue={editingRule?.startMonth ?? monthKey(new Date())} aria-label="Start month" className={inputClass} />
           {(frequency === "QUARTERLY" || frequency === "YEARLY") && (
             <span className="text-xs font-normal text-slate-400">
               {frequency === "QUARTERLY" ? "and every 3rd month after" : "and the same month each year"}
@@ -166,7 +252,7 @@ export function RecurringForm({
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
           Ends (optional)
-          <input name="endMonth" type="month" className={inputClass} />
+          <input name="endMonth" type="month" defaultValue={editingRule?.endMonth ?? undefined} aria-label="End month" className={inputClass} />
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
           Paid by
@@ -216,7 +302,7 @@ export function RecurringForm({
         disabled={isPending}
         className="self-start rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
       >
-        {isPending ? "Saving..." : "Add recurring expense"}
+        {isPending ? "Saving..." : isEditing ? "Save changes" : "Add recurring expense"}
       </button>
     </form>
   );

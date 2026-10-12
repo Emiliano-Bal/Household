@@ -48,6 +48,13 @@ export const createRecurringExpenseSchema = z
     path: ["dayOfMonth"],
   });
 
+// createRecurringExpenseSchema is a ZodEffects (it has a .refine), so it
+// has no .extend — the id is intersected on instead.
+export const updateRecurringExpenseSchema = z.intersection(
+  createRecurringExpenseSchema,
+  z.object({ id: z.string().min(1) })
+);
+
 export const incomeRecordSchema = z.object({
   memberId: z.string().min(1),
   month: z.coerce.date(),

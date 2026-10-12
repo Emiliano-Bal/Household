@@ -1,8 +1,11 @@
+import Link from "next/link";
 import { listRecurringExpenses, listCategories, getHousehold } from "@/lib/queries";
 import { formatCents } from "@/lib/money";
-import { monthStart } from "@/lib/month";
+import { monthStart, monthKey } from "@/lib/month";
 import { MonthNav } from "@/components/month-nav";
-import { RecurringForm } from "@/components/recurring-form";
+import { RecurringEditor } from "@/components/recurring-editor";
+import type { EditingRecurring } from "@/components/recurring-form";
+import { DeleteRecurringButton, ToggleRecurringActiveButton } from "@/components/recurring-actions";
 import { GenerateRecurringButton } from "@/components/generate-recurring-button";
 import type { SplitRule } from "@/lib/splitting";
 import { describeRecurrence, nextOccurrence, type RecurringExpenseInput } from "@/lib/recurring";
@@ -36,10 +39,10 @@ export default async function RecurringPage({
   searchParams,
 }: {
   params: Promise<{ householdId: string }>;
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; edit?: string }>;
 }) {
   const { householdId } = await params;
-  const { month: monthParam } = await searchParams;
+  const { month: monthParam, edit: editId } = await searchParams;
   const month = parseMonth(monthParam);
 
   const [household, categories, recurring] = await Promise.all([
@@ -54,6 +57,32 @@ export default async function RecurringPage({
   // "when does this fire next" is a question about today.
   const today = new Date();
 
+  const editingRow = editId ? recurring.find((r) => r.id === editId) : undefined;
+  const editingRule: EditingRecurring | null = editingRow
+    ? {
+        id: editingRow.id,
+        label: editingRow.label,
+        amountCents: editingRow.amount,
+        categoryId: editingRow.categoryId,
+        frequency: editingRow.frequency,
+        interval: editingRow.interval,
+        dayOfMonth: editingRow.dayOfMonth,
+        dayOfWeek: editingRow.dayOfWeek,
+        startMonth: monthKey(editingRow.startMonth),
+        endMonth: editingRow.endMonth ? monthKey(editingRow.endMonth) : null,
+        paidByMemberId: editingRow.paidByMemberId,
+        splitType: ((editingRow.splitRule as SplitRule)?.type ?? "PROPORTIONAL") as EditingRecurring["splitType"],
+        exactAmountsCents:
+          (editingRow.splitRule as SplitRule)?.type === "EXACT"
+            ? ((editingRow.splitRule as Extract<SplitRule, { type: "EXACT" }>).amounts ?? {})
+            : {},
+        percentages:
+          (editingRow.splitRule as SplitRule)?.type === "PERCENTAGE"
+            ? ((editingRow.splitRule as Extract<SplitRule, { type: "PERCENTAGE" }>).percentages ?? {})
+            : {},
+      }
+    : null;
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -61,8 +90,8 @@ export default async function RecurringPage({
         <GenerateRecurringButton householdId={householdId} month={month} />
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table className="w-full min-w-[62rem] text-sm">
           <thead>
             <tr className="text-left text-slate-400">
               <th className="px-4 py-2 font-medium">Label</th>
@@ -73,12 +102,13 @@ export default async function RecurringPage({
               <th className="px-4 py-2 font-medium">Split</th>
               <th className="px-4 py-2 font-medium">Active range</th>
               <th className="px-4 py-2 text-right font-medium">Amount</th>
+              <th className="px-4 py-2 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {recurring.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
                   No recurring expenses yet.
                 </td>
               </tr>
@@ -119,6 +149,23 @@ export default async function RecurringPage({
                   {r.endMonth ? r.endMonth.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }) : "ongoing"}
                 </td>
                 <td className="px-4 py-2 text-right font-medium text-slate-900">{formatCents(r.amount)}</td>
+                <td className="px-4 py-2">
+                  <div className="flex flex-wrap items-start justify-end gap-1">
+                    <Link
+                      href={`/h/${householdId}/expenses/recurring?edit=${r.id}`}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                    >
+                      Edit
+                    </Link>
+                    <ToggleRecurringActiveButton householdId={householdId} recurringId={r.id} active={r.active} />
+                    <DeleteRecurringButton
+                      householdId={householdId}
+                      recurringId={r.id}
+                      label={r.label}
+                      generatedCount={r._count.expenses}
+                    />
+                  </div>
+                </td>
               </tr>
               );
             })}
@@ -126,7 +173,12 @@ export default async function RecurringPage({
         </table>
       </div>
 
-      <RecurringForm householdId={householdId} members={members} categories={categories} />
+      <RecurringEditor
+        householdId={householdId}
+        members={members}
+        categories={categories}
+        editingRule={editingRule}
+      />
     </div>
   );
 }

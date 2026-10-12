@@ -234,6 +234,91 @@ household's id can view and edit everything in it. That's the gap item 2
 of your original ask closes; until that's built, treat the deployed URL as
 "security through obscurity" only, same as it's been in local dev.)
 
+## Backups
+
+Two independent backups, because they fail in different ways: a database
+dump is complete but needs a Postgres client to read, and a CSV export is
+lossy but opens anywhere, forever, with no tooling at all.
+
+### Supabase's own automated backups — CHECK THIS YOURSELF
+
+**This is not confirmed, and it is the one item here that cannot be
+checked from the code.** The database connection reports
+`archive_mode = on` and `wal_level = logical`, but those are Supabase's
+platform-wide settings for replication; they say nothing about whether
+point-in-time recovery or daily backups are retained **for this project's
+plan**.
+
+Look at **Supabase Dashboard → Project Settings → Database → Backups**.
+As of writing, the tiers work out roughly as:
+
+| Plan | What you get |
+|---|---|
+| Free | **No automated backups.** Nothing is retained for you. |
+| Pro | Daily backups, 7-day retention; PITR as a paid add-on |
+| Team / Enterprise | Longer retention, PITR available |
+
+If this project is on the Free plan — which is the default, and likely —
+then **nobody is backing this database up but you**, and the two commands
+below are the whole of your safety net. Treat them accordingly.
+
+### `npm run db:backup` — full pg_dump
+
+```bash
+npm run db:backup                # writes ./backups/gastos-YYYYMMDD-HHMMSS.dump
+npm run db:backup -- --out ~/bk  # somewhere else
+```
+
+Requires a **PostgreSQL 17 or newer** client, because the server runs
+17.11 and `pg_dump` refuses to dump a server newer than itself:
+
+```bash
+# macOS
+brew install libpq && brew link --force libpq
+# Debian/Ubuntu
+sudo apt-get install postgresql-client-17
+```
+
+The script takes care of two things that otherwise bite:
+
+- **Port.** `pg_dump` needs a real session, which Supabase's transaction
+  pooler (6543) cannot provide. If `DATABASE_URL` points at 6543 the
+  script rewrites it to the session pooler (5432) and says so.
+- **Client version.** A client older than the server is refused outright
+  rather than being allowed to write a partial file.
+
+Verify a dump before trusting it:
+
+```bash
+pg_restore --list backups/gastos-*.dump | grep TABLE
+```
+
+Restore into a fresh database with:
+
+```bash
+pg_restore --clean --if-exists --no-owner --no-privileges \
+  -d "postgresql://...:5432/postgres" backups/gastos-20261012-120000.dump
+```
+
+`backups/` is gitignored — a dump is a complete copy of the household's
+finances and must not end up in the repository.
+
+### CSV export — the backup that outlives the hosting
+
+On the Dashboard, under **Export / backup**: one file each for expenses,
+income, settlements and savings contributions. No client, no plan, no
+credentials beyond being able to open the page.
+
+Amounts are written as decimal numbers rather than cents, so a
+spreadsheet totals them correctly without anyone needing to know the
+storage convention. Files are UTF-8 with a BOM so Excel on Windows reads
+the € sign correctly, and any field starting with `=`, `+`, `-` or `@` is
+prefixed with an apostrophe so a label can never be executed as a
+spreadsheet formula.
+
+This export is lossy by design — it is a record of what happened, not a
+restorable database. For an actual restore, use the pg_dump above.
+
 ## Troubleshooting quick reference
 
 - **Migration hangs, then `connect ETIMEDOUT` / `ENETUNREACH` against

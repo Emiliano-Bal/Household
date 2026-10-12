@@ -56,7 +56,9 @@ export async function getExpense(expenseId: string) {
 export async function listRecurringExpenses(householdId: string) {
   return prisma.recurringExpense.findMany({
     where: { householdId },
-    include: { category: true, paidBy: true },
+    // _count feeds the delete dialog, which has to say how many expenses
+    // would be kept (or, on the opt-out, removed).
+    include: { category: true, paidBy: true, _count: { select: { expenses: true } } },
     orderBy: { label: "asc" },
   });
 }

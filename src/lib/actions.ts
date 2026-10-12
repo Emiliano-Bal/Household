@@ -7,6 +7,7 @@ import { monthStart, addMonths } from "./month";
 import { buildStoredIncomeRatioSnapshot, computeExpenseShares, previewSettlement, type SplitRule } from "./splitting";
 import { computeHouseholdBalancesMap } from "./queries";
 import { findIncomeEditImpact, findSettlementImpact, type SettlementImpact } from "./income-impact";
+import { findExpenseChangeImpact, type ExpenseChangeImpact as BaseExpenseChangeImpact } from "./expense-impact";
 import { materializeRecurringExpenses, recurringExpensesDueForMonth, type RecurringExpenseInput } from "./recurring";
 import { DEFAULT_CATEGORIES } from "./default-categories";
 import {
@@ -14,6 +15,7 @@ import {
   setBudgetLimitSchema,
   updateExpenseSchema,
   createRecurringExpenseSchema,
+  updateRecurringExpenseSchema,
   incomeRecordSchema,
   createMemberSchema,
   createSavingsGoalSchema,
@@ -21,6 +23,9 @@ import {
   createSettlementSchema,
 } from "./schemas";
 import { z } from "zod";
+
+/** The pure impact plus the member name, which every caller needs to render it. */
+export type ExpenseChangeImpact = BaseExpenseChangeImpact & { memberName: string };
 
 async function membersAndIncomeFor(householdId: string) {
   const [members, incomeRecords] = await Promise.all([
@@ -128,8 +133,69 @@ export async function updateExpense(input: z.infer<typeof updateExpenseSchema>) 
 }
 
 export async function deleteExpense(expenseId: string, householdId: string) {
-  await prisma.expense.delete({ where: { id: expenseId } });
+  // Scoped delete: the id comes from a URL/form field, and a bare
+  // delete-by-id would happily remove another household's expense.
+  const result = await prisma.expense.deleteMany({ where: { id: expenseId, householdId } });
+  if (result.count === 0) return { ok: false as const, error: "That expense does not belong to this household." };
   revalidatePath(`/h/${householdId}`);
+  return { ok: true as const };
+}
+
+/**
+ * Read-only preview of what editing or deleting an expense would do to
+ * balances that have already been settled. Pass `proposed: null` for a
+ * deletion. Mirrors getIncomeEditImpact: the UI calls this first and
+ * decides whether to show a confirmation; nothing is ever blocked.
+ */
+export async function getExpenseChangeImpact(params: {
+  householdId: string;
+  expenseId: string;
+  proposed: { amount: number; date: Date; paidByMemberId: string; splitRule: SplitRule; isShared: boolean } | null;
+}): Promise<ExpenseChangeImpact[]> {
+  const [expenses, settlements, memberRows] = await Promise.all([
+    prisma.expense.findMany({
+      where: { householdId: params.householdId },
+      select: { id: true, paidByMemberId: true, isShared: true, shares: { select: { memberId: true, owedAmount: true } } },
+    }),
+    prisma.settlement.findMany({
+      where: { householdId: params.householdId },
+      select: { fromMemberId: true, toMemberId: true, amount: true },
+    }),
+    prisma.member.findMany({ where: { householdId: params.householdId }, select: { id: true, name: true } }),
+  ]);
+
+  let proposed: Parameters<typeof findExpenseChangeImpact>[2] = null;
+  if (params.proposed) {
+    const { members, incomeRecords } = await membersAndIncomeFor(params.householdId);
+    // Shares are recomputed from the ratio in effect on the proposed
+    // DATE, not today's — moving an expense to another month must price
+    // it by that month's income.
+    const shareResult = computeExpenseShares(
+      params.proposed.amount,
+      params.proposed.paidByMemberId,
+      params.proposed.splitRule,
+      members,
+      incomeRecords,
+      params.proposed.date
+    );
+    proposed = {
+      paidByMemberId: params.proposed.paidByMemberId,
+      isShared: params.proposed.isShared,
+      shares: shareResult.shares,
+    };
+  }
+
+  const impact = findExpenseChangeImpact(
+    expenses.map((e) => ({ id: e.id, paidByMemberId: e.paidByMemberId, isShared: e.isShared, shares: e.shares })),
+    params.expenseId,
+    proposed,
+    settlements.map((st) => ({ fromMemberId: st.fromMemberId, toMemberId: st.toMemberId, amountCents: st.amount }))
+  );
+
+  // Names, so the dialog can say "Nano goes from owed X to owing Y"
+  // rather than printing member ids at the user.
+  const nameById = new Map(memberRows.map((m) => [m.id, m.name]));
+  return impact.map((i) => ({ ...i, memberName: nameById.get(i.memberId) ?? i.memberId }));
 }
 
 // --- Income -----------------------------------------------------------
@@ -330,6 +396,84 @@ export async function createRecurringExpense(input: z.infer<typeof createRecurri
   });
   revalidatePath(`/h/${data.householdId}`);
   return created;
+}
+
+export async function updateRecurringExpense(input: z.infer<typeof updateRecurringExpenseSchema>) {
+  const data = updateRecurringExpenseSchema.parse(input);
+
+  const owned = await prisma.recurringExpense.findFirst({
+    where: { id: data.id, householdId: data.householdId },
+    select: { id: true },
+  });
+  if (!owned) return { ok: false as const, error: "That recurring expense does not belong to this household." };
+
+  // Only the rule changes here. Expenses it has already generated are
+  // left exactly as they were: they are historical fact, and silently
+  // repricing past months because the rule changed is the behaviour this
+  // app goes out of its way to avoid everywhere else.
+  await prisma.recurringExpense.update({
+    where: { id: data.id },
+    data: {
+      categoryId: data.categoryId,
+      label: data.label,
+      amount: data.amount,
+      frequency: data.frequency,
+      interval: data.interval,
+      dayOfMonth: data.dayOfMonth,
+      dayOfWeek: data.dayOfWeek,
+      startMonth: monthStart(data.startMonth),
+      endMonth: data.endMonth ? monthStart(data.endMonth) : null,
+      paidByMemberId: data.paidByMemberId,
+      splitRule: data.splitRule satisfies SplitRule,
+    },
+  });
+
+  revalidatePath(`/h/${data.householdId}`);
+  return { ok: true as const };
+}
+
+/**
+ * Delete a recurring rule. Expenses it already generated are KEPT by
+ * default and simply lose their link to it — they are real spending that
+ * really happened, and deleting the template is a statement about the
+ * future, not a retraction of the past. `alsoDeleteGenerated` is the
+ * explicit opt-out.
+ */
+export async function deleteRecurringExpense(
+  id: string,
+  householdId: string,
+  options: { alsoDeleteGenerated?: boolean } = {}
+) {
+  const owned = await prisma.recurringExpense.findFirst({ where: { id, householdId }, select: { id: true } });
+  if (!owned) return { ok: false as const, error: "That recurring expense does not belong to this household." };
+
+  const generatedCount = await prisma.expense.count({ where: { recurringExpenseId: id, householdId } });
+
+  if (options.alsoDeleteGenerated) {
+    await prisma.$transaction([
+      prisma.expense.deleteMany({ where: { recurringExpenseId: id, householdId } }),
+      prisma.recurringExpense.delete({ where: { id } }),
+    ]);
+    revalidatePath(`/h/${householdId}`);
+    return { ok: true as const, keptCount: 0, deletedCount: generatedCount };
+  }
+
+  // Detach first and explicitly, rather than relying on the relation's
+  // default referential action to null the column for us.
+  await prisma.$transaction([
+    prisma.expense.updateMany({
+      where: { recurringExpenseId: id, householdId },
+      data: { recurringExpenseId: null, occurrenceDate: null },
+    }),
+    prisma.recurringExpense.delete({ where: { id } }),
+  ]);
+
+  revalidatePath(`/h/${householdId}`);
+  return { ok: true as const, keptCount: generatedCount, deletedCount: 0 };
+}
+
+export async function countGeneratedExpenses(recurringExpenseId: string, householdId: string) {
+  return prisma.expense.count({ where: { recurringExpenseId, householdId } });
 }
 
 export async function setRecurringExpenseActive(id: string, householdId: string, active: boolean) {

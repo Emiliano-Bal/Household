@@ -331,6 +331,29 @@ export default async function DashboardPage({
         </div>
       </section>
 
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Export / backup</h2>
+        <p className="mt-1 text-xs text-slate-400">
+          Everything this household holds, as CSV. Works regardless of hosting — keep a copy somewhere you control.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {[
+            ["expenses", "Expenses"],
+            ["income", "Income"],
+            ["settlements", "Settlements"],
+            ["savings-contributions", "Savings contributions"],
+          ].map(([slug, label]) => (
+            <a
+              key={slug}
+              href={`/h/${householdId}/export/${slug}`}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            >
+              {label} CSV
+            </a>
+          ))}
+        </div>
+      </section>
+
       <div className="flex gap-3">
         <Link
           href={`/h/${householdId}/expenses`}
