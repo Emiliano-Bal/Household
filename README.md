@@ -37,8 +37,9 @@ test ever disagree, trust the test and file it as a bug.
 ## Testing
 
 ```bash
-npm test        # 44 pure-function tests, no database — always green
-npm run test:db # a handful of real-database integration tests — needs db:up + db:migrate + a seeded/reachable Postgres first
+npm test        # pure-function tests, no database — always green
+npm run test:db # real-database integration tests — needs db:up + db:migrate + a seeded/reachable Postgres first
+npm run e2e     # Playwright: drives the real screens in a browser against a real database
 ```
 
 `npm test` is where the splitting engine itself lives (`src/lib/splitting.ts`,
@@ -52,6 +53,13 @@ npm run test:db # a handful of real-database integration tests — needs db:up +
 - The income-edit-impact detector that the "don't silently rewrite settled balances" rule depends on
 - Recurring-expense materialization (due-month filtering, day-of-month clamping to short months)
 - `formatCents`/`formatPercent` producing real es-ES output ("310,00 €", "60,0 %")
+
+`npm run e2e` goes one level further out: it builds the app, serves it, and
+drives the actual screens in Chromium against a real database — the only
+layer that catches a query that is right and a page that renders it wrong.
+It needs `DATABASE_URL` and a one-time `npx playwright install chromium`.
+Each spec creates its own `__e2e__` household and deletes it afterwards, so
+it never touches data anyone is using.
 
 `npm run test:db` needs a real, migrated Postgres and is NOT part of the
 default `npm test` (kept separate on purpose — DB tests shouldn't make the
@@ -205,6 +213,7 @@ src/lib/db.ts               PrismaClient singleton (driver-adapter pattern)
 src/lib/queries.ts          reads, called directly from Server Components
 src/lib/actions.ts          writes, "use server" — called from client forms
 src/lib/*.db.test.ts        real-database integration tests — `npm run test:db`, not `npm test`
+e2e/*.spec.ts               Playwright browser tests — `npm run e2e`, not `npm test`
 src/app/                    the 5 screens (Dashboard, Expenses, Recurring, Income, Savings)
 src/components/             client components (forms, the income-edit confirmation dialog, etc.)
 legacy/                     three prior versions of this project, kept for reference, not wired to anything

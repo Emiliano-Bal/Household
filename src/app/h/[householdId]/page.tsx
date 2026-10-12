@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getDashboardData, getHousehold, getBalances } from "@/lib/queries";
+import { getDashboardData, getHousehold, getBalances, getBudgetStatus } from "@/lib/queries";
 import { describeBalance, formatCents, formatPercent } from "@/lib/money";
 import { monthStart, monthKey } from "@/lib/month";
 import { MonthNav } from "@/components/month-nav";
@@ -24,10 +24,11 @@ export default async function DashboardPage({
   const { month: monthParam } = await searchParams;
   const month = parseMonth(monthParam);
 
-  const [household, dashboard, balances] = await Promise.all([
+  const [household, dashboard, balances, budget] = await Promise.all([
     getHousehold(householdId),
     getDashboardData(householdId, month),
     getBalances(householdId),
+    getBudgetStatus(householdId, month),
   ]);
 
   if (!household) return null;
@@ -91,6 +92,90 @@ export default async function DashboardPage({
         <p className={`mt-1 text-2xl font-semibold ${dashboard.leftoverCents < 0 ? "text-red-600" : "text-emerald-600"}`}>
           {formatCents(dashboard.leftoverCents)}
         </p>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-3">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Budget this month</h2>
+          <Link href={`/h/${householdId}/budget`} className="text-xs font-medium text-slate-400 hover:text-slate-600">
+            Adjust limits &rarr;
+          </Link>
+        </div>
+
+        {budget.rows.length === 0 ? (
+          <p className="px-5 py-4 text-sm text-slate-400">
+            No spending limits set yet.{" "}
+            <Link href={`/h/${householdId}/budget`} className="font-medium text-slate-600 underline">
+              Set one
+            </Link>{" "}
+            for a variable category — Groceries, Eating Out — and the month&apos;s progress against it shows here.
+          </p>
+        ) : (
+          <>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-400">
+                  <th className="px-5 py-2 font-medium">Category</th>
+                  <th className="px-5 py-2 text-right font-medium">Spent</th>
+                  <th className="px-5 py-2 text-right font-medium">Limit</th>
+                  <th className="px-5 py-2 text-right font-medium">Left</th>
+                  <th className="w-40 px-5 py-2 font-medium">Progress</th>
+                </tr>
+              </thead>
+              <tbody>
+                {budget.rows.map((row) => {
+                  const over = row.remainingCents < 0;
+                  return (
+                    <tr key={row.categoryId} className="border-t border-slate-100">
+                      <td className="px-5 py-2.5 font-medium text-slate-800">{row.categoryName}</td>
+                      <td className="px-5 py-2.5 text-right tabular-nums text-slate-600">{formatCents(row.spentCents)}</td>
+                      <td className="px-5 py-2.5 text-right tabular-nums text-slate-400">{formatCents(row.limitCents)}</td>
+                      <td
+                        className={`px-5 py-2.5 text-right font-medium tabular-nums ${over ? "text-red-600" : "text-emerald-600"}`}
+                      >
+                        {formatCents(row.remainingCents)}
+                      </td>
+                      <td className="px-5 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className={`h-full rounded-full ${over ? "bg-red-500" : row.usedPercent >= 80 ? "bg-amber-500" : "bg-emerald-500"}`}
+                              style={{ width: `${Math.min(100, row.usedPercent)}%` }}
+                            />
+                          </div>
+                          <span className={`w-12 text-right text-xs ${over ? "font-medium text-red-600" : "text-slate-400"}`}>
+                            {formatPercent(row.usedPercent, undefined, 0)}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-200 bg-slate-50 font-medium">
+                  <td className="px-5 py-3 text-slate-700">Total</td>
+                  <td className="px-5 py-3 text-right tabular-nums text-slate-900">{formatCents(budget.totalSpentCents)}</td>
+                  <td className="px-5 py-3 text-right tabular-nums text-slate-500">{formatCents(budget.totalLimitCents)}</td>
+                  <td
+                    className={`px-5 py-3 text-right tabular-nums ${budget.totalLimitCents - budget.totalSpentCents < 0 ? "text-red-600" : "text-emerald-600"}`}
+                  >
+                    {formatCents(budget.totalLimitCents - budget.totalSpentCents)}
+                  </td>
+                  <td className="px-5 py-3" />
+                </tr>
+              </tfoot>
+            </table>
+            {budget.unlimitedVariableCents > 0 && (
+              <p className="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">
+                A further{" "}
+                <span className="font-medium text-slate-700">{formatCents(budget.unlimitedVariableCents)}</span> went
+                to variable categories with no limit set — not counted in the totals above, so an unlimited category
+                can&apos;t make the month look on-budget.
+              </p>
+            )}
+          </>
+        )}
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white">

@@ -77,11 +77,10 @@ export const createSettlementSchema = z
     path: ["toMemberId"],
   });
 
-// amount is allowed to be 0 — "budgeted nothing for this category this
-// month" is a meaningful plan, distinct from having no budget row at all.
-export const setBudgetSchema = z.object({
+// amount null means "stop limiting this category"; 0 is a real limit of
+// zero, which is a meaningful thing to set. The two are kept distinct.
+export const setBudgetLimitSchema = z.object({
   householdId: z.string().min(1),
   categoryId: z.string().min(1),
-  month: z.coerce.date(),
-  amount: z.number().int().min(0),
+  amount: z.number().int().min(0).nullable(),
 });

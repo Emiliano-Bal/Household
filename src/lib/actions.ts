@@ -11,7 +11,7 @@ import { materializeRecurringExpense, recurringExpensesDueForMonth } from "./rec
 import { DEFAULT_CATEGORIES } from "./default-categories";
 import {
   createExpenseSchema,
-  setBudgetSchema,
+  setBudgetLimitSchema,
   updateExpenseSchema,
   createRecurringExpenseSchema,
   incomeRecordSchema,
@@ -467,64 +467,43 @@ export async function deleteSettlement(settlementId: string, householdId: string
   revalidatePath(`/h/${householdId}`);
 }
 
-// --- Budgets --------------------------------------------------------------
+// --- Budget limits -------------------------------------------------------
 
-export async function setBudget(input: z.infer<typeof setBudgetSchema>) {
-  const data = setBudgetSchema.parse(input);
-  const month = monthStart(data.month);
+/**
+ * Set (or clear, with amount null) the standing limit for a category,
+ * effective from the current month. Earlier months keep resolving to
+ * whatever row was in effect for them, so changing a limit in November
+ * leaves October's reports measured against the old one.
+ */
+export async function setBudgetLimit(input: z.infer<typeof setBudgetLimitSchema>) {
+  const data = setBudgetLimitSchema.parse(input);
 
-  // Guard the category against cross-household writes: categoryId comes
-  // from a form field, and the unique constraint is on (categoryId, month)
-  // alone, so nothing else here would stop a budget being written onto
-  // another household's category.
+  // Only VARIABLE categories are budgetable, and the category must belong
+  // to this household: both arrive from form fields, and the unique
+  // constraint is on (categoryId, effectiveFrom) alone, so nothing else
+  // would stop a limit landing on a fixed category or another household's.
   const category = await prisma.category.findFirst({
     where: { id: data.categoryId, householdId: data.householdId },
-    select: { id: true },
+    select: { id: true, kind: true, name: true },
   });
-  if (!category) return { ok: false as const, error: "That category does not belong to this household." };
+  if (!category) {
+    return { ok: false as const, error: "That category does not belong to this household." };
+  }
+  if (category.kind !== "VARIABLE") {
+    return {
+      ok: false as const,
+      error: `${category.name} is a ${category.kind.toLowerCase()} category. Only variable categories can have a spending limit.`,
+    };
+  }
 
-  const budget = await prisma.budget.upsert({
-    where: { categoryId_month: { categoryId: data.categoryId, month } },
-    create: { householdId: data.householdId, categoryId: data.categoryId, month, amount: data.amount },
+  const effectiveFrom = monthStart(new Date());
+  const limit = await prisma.budgetLimit.upsert({
+    where: { categoryId_effectiveFrom: { categoryId: data.categoryId, effectiveFrom } },
+    create: { householdId: data.householdId, categoryId: data.categoryId, effectiveFrom, amount: data.amount },
     update: { amount: data.amount },
   });
 
   revalidatePath(`/h/${data.householdId}/budget`);
   revalidatePath(`/h/${data.householdId}`);
-  return { ok: true as const, budget };
-}
-
-/** Removing the row is distinct from setting it to 0: no row means "unbudgeted", 0 means "deliberately nothing". */
-export async function clearBudget(householdId: string, categoryId: string, month: Date) {
-  await prisma.budget.deleteMany({ where: { householdId, categoryId, month: monthStart(month) } });
-  revalidatePath(`/h/${householdId}/budget`);
-  revalidatePath(`/h/${householdId}`);
-}
-
-export async function copyLastMonthBudget(householdId: string, targetMonth: Date) {
-  const target = monthStart(targetMonth);
-  const previous = addMonths(target, -1);
-
-  const [previousBudgets, existingTarget] = await Promise.all([
-    prisma.budget.findMany({ where: { householdId, month: previous } }),
-    prisma.budget.findMany({ where: { householdId, month: target }, select: { categoryId: true } }),
-  ]);
-
-  const alreadySet = new Set(existingTarget.map((b) => b.categoryId));
-  const toCreate = previousBudgets.filter((b) => !alreadySet.has(b.categoryId));
-
-  if (toCreate.length > 0) {
-    await prisma.budget.createMany({
-      data: toCreate.map((b) => ({
-        householdId,
-        categoryId: b.categoryId,
-        month: target,
-        amount: b.amount,
-      })),
-    });
-  }
-
-  revalidatePath(`/h/${householdId}/budget`);
-  revalidatePath(`/h/${householdId}`);
-  return { copiedCount: toCreate.length, skippedCount: previousBudgets.length - toCreate.length };
+  return { ok: true as const, limit };
 }

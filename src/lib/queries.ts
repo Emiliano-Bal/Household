@@ -425,114 +425,118 @@ export async function getMemberDashboardData(
   };
 }
 
-export interface BudgetPlanRow {
+export interface BudgetLimitRow {
   categoryId: string;
   categoryName: string;
-  kind: CategoryKind;
-  /** null means no budget row for this month — distinct from a deliberate 0. */
-  budgetedCents: number | null;
-  actualCents: number;
-  /** null while unbudgeted; negative once actual exceeds the budget. */
-  remainingCents: number | null;
-  /** 0-100+ (uncapped, so an overspend reads as e.g. 140). null while unbudgeted. */
-  usedPercent: number | null;
-}
-
-export interface BudgetPlan {
-  month: Date;
-  rows: BudgetPlanRow[];
-  totalBudgetedCents: number;
-  /**
-   * Actual spending in BUDGETED categories only, so it compares like for
-   * like against totalBudgetedCents. Spending outside the plan is reported
-   * separately below rather than folded in, which would make a household
-   * look on-budget simply for having left a category unbudgeted.
-   */
-  totalActualCents: number;
-  unbudgetedActualCents: number;
-  uncategorizedActualCents: number;
-  /** Same figure the Dashboard shows, including prior-month income fallback. */
-  totalIncomeCents: number;
-  /** Drives the "copy last month" affordance — 0 means there is nothing to copy. */
-  previousMonthBudgetCount: number;
+  /** The limit in effect for the month asked about; null means this category is not limited. */
+  limitCents: number | null;
 }
 
 /**
- * The month's plan: every category, what it was budgeted, and what was
- * actually spent against it.
+ * The standing limit in effect for each VARIABLE category as of `month`.
  *
- * totalIncomeCents comes from getDashboardData rather than a local sum so
- * the budget page and the Dashboard cannot disagree about this month's
- * income — computeIncomeShares is the only place prior-month fallback is
- * resolved.
+ * Resolution is "the latest row at or before this month wins": limits
+ * persist until a later row supersedes them, so a limit set in October is
+ * still the limit in November, December and onward with no new row. A row
+ * with a null amount is a real answer — it stops a previously set limit
+ * from that month on — not a missing one.
  */
-export async function getBudgetPlan(householdId: string, month: Date): Promise<BudgetPlan> {
-  const start = monthStart(month);
-  const end = addMonths(start, 1);
-  const previous = addMonths(start, -1);
+export async function getBudgetLimits(householdId: string, month: Date): Promise<BudgetLimitRow[]> {
+  const asOf = monthStart(month);
 
-  const [categories, budgets, expenses, previousCount, dashboard] = await Promise.all([
-    prisma.category.findMany({ where: { householdId }, orderBy: { name: "asc" } }),
-    prisma.budget.findMany({ where: { householdId, month: start } }),
-    prisma.expense.findMany({
-      where: { householdId, date: { gte: start, lt: end } },
-      select: { amount: true, categoryId: true },
+  const [categories, rows] = await Promise.all([
+    prisma.category.findMany({
+      where: { householdId, kind: "VARIABLE" },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
     }),
-    prisma.budget.count({ where: { householdId, month: previous } }),
-    getDashboardData(householdId, start),
+    prisma.budgetLimit.findMany({
+      where: { householdId, effectiveFrom: { lte: asOf } },
+      orderBy: { effectiveFrom: "asc" },
+      select: { categoryId: true, amount: true },
+    }),
   ]);
 
-  const budgetByCategory = new Map(budgets.map((b) => [b.categoryId, b.amount]));
+  // Ascending order means the last write for a category is the latest row
+  // at or before `asOf` — exactly the one in effect.
+  const inEffect = new Map<string, number | null>();
+  for (const r of rows) inEffect.set(r.categoryId, r.amount);
 
-  const actualByCategory = new Map<string, number>();
-  let uncategorizedActualCents = 0;
+  return categories.map((c) => ({
+    categoryId: c.id,
+    categoryName: c.name,
+    limitCents: inEffect.has(c.id) ? inEffect.get(c.id)! : null,
+  }));
+}
+
+export interface BudgetStatusRow extends BudgetLimitRow {
+  limitCents: number;
+  /** Every member's spending in this category this month, whoever paid. */
+  spentCents: number;
+  remainingCents: number;
+  /** Uncapped, so an overspend reads as e.g. 140 rather than a clamped 100. */
+  usedPercent: number;
+}
+
+export interface BudgetStatus {
+  month: Date;
+  rows: BudgetStatusRow[];
+  totalLimitCents: number;
+  totalSpentCents: number;
+  /** Spending in variable categories that carry no limit — reported, never folded into the totals above. */
+  unlimitedVariableCents: number;
+}
+
+/**
+ * Spend against limit for one month. The limit comes from whatever row was
+ * in effect for THAT month, so a past month keeps reporting against the
+ * limit it was actually measured by.
+ *
+ * Spend is household-wide: every expense in the category that month counts,
+ * regardless of which member paid it.
+ */
+export async function getBudgetStatus(householdId: string, month: Date): Promise<BudgetStatus> {
+  const start = monthStart(month);
+  const end = addMonths(start, 1);
+
+  const [limits, expenses] = await Promise.all([
+    getBudgetLimits(householdId, start),
+    prisma.expense.findMany({
+      where: { householdId, date: { gte: start, lt: end }, category: { kind: "VARIABLE" } },
+      select: { amount: true, categoryId: true },
+    }),
+  ]);
+
+  const spentByCategory = new Map<string, number>();
   for (const e of expenses) {
-    if (!e.categoryId) {
-      uncategorizedActualCents += e.amount;
-      continue;
-    }
-    actualByCategory.set(e.categoryId, (actualByCategory.get(e.categoryId) ?? 0) + e.amount);
+    if (!e.categoryId) continue;
+    spentByCategory.set(e.categoryId, (spentByCategory.get(e.categoryId) ?? 0) + e.amount);
   }
 
-  let totalBudgetedCents = 0;
-  let totalActualCents = 0;
-  let unbudgetedActualCents = 0;
+  let totalLimitCents = 0;
+  let totalSpentCents = 0;
+  let unlimitedVariableCents = 0;
+  const rows: BudgetStatusRow[] = [];
 
-  const rows: BudgetPlanRow[] = categories.map((c) => {
-    const budgetedCents = budgetByCategory.has(c.id) ? budgetByCategory.get(c.id)! : null;
-    const actualCents = actualByCategory.get(c.id) ?? 0;
-
-    if (budgetedCents === null) {
-      unbudgetedActualCents += actualCents;
-    } else {
-      totalBudgetedCents += budgetedCents;
-      totalActualCents += actualCents;
+  for (const limit of limits) {
+    const spentCents = spentByCategory.get(limit.categoryId) ?? 0;
+    if (limit.limitCents === null) {
+      unlimitedVariableCents += spentCents;
+      continue;
     }
+    totalLimitCents += limit.limitCents;
+    totalSpentCents += spentCents;
+    rows.push({
+      ...limit,
+      limitCents: limit.limitCents,
+      spentCents,
+      remainingCents: limit.limitCents - spentCents,
+      // A zero limit with spending against it is fully used, not 0% used.
+      usedPercent: limit.limitCents === 0 ? (spentCents > 0 ? 100 : 0) : (spentCents / limit.limitCents) * 100,
+    });
+  }
 
-    return {
-      categoryId: c.id,
-      categoryName: c.name,
-      kind: c.kind,
-      budgetedCents,
-      actualCents,
-      remainingCents: budgetedCents === null ? null : budgetedCents - actualCents,
-      // A 0 budget with real spending is infinitely over, not 0% used —
-      // report it as 100 so the bar renders full rather than empty.
-      usedPercent:
-        budgetedCents === null ? null : budgetedCents === 0 ? (actualCents > 0 ? 100 : 0) : (actualCents / budgetedCents) * 100,
-    };
-  });
-
-  return {
-    month: start,
-    rows,
-    totalBudgetedCents,
-    totalActualCents,
-    unbudgetedActualCents,
-    uncategorizedActualCents,
-    totalIncomeCents: dashboard.totalIncomeCents,
-    previousMonthBudgetCount: previousCount,
-  };
+  return { month: start, rows, totalLimitCents, totalSpentCents, unlimitedVariableCents };
 }
 
 export interface RunwayDay {

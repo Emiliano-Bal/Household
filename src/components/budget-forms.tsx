@@ -2,52 +2,56 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { setBudget, clearBudget, copyLastMonthBudget } from "@/lib/actions";
+import { setBudgetLimit } from "@/lib/actions";
 
 /**
- * One row's amount input. Saves on blur as well as on submit, because the
- * natural way to fill a budget table is to type a number and tab to the
- * next row — never pressing Enter at all.
+ * One category's standing limit. Saves on blur as well as on submit,
+ * because the natural way to fill this list is to type a number and tab to
+ * the next row rather than pressing Enter on each.
  */
-export function BudgetAmountInput({
+export function BudgetLimitInput({
   householdId,
   categoryId,
-  month,
-  budgetedCents,
+  categoryName,
+  limitCents,
 }: {
   householdId: string;
   categoryId: string;
-  /** "YYYY-MM-DD" (the 1st) — kept as a string so the server action gets a stable value. */
-  month: string;
-  budgetedCents: number | null;
+  categoryName: string;
+  limitCents: number | null;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const initial = budgetedCents === null ? "" : (budgetedCents / 100).toFixed(2);
+  const initial = limitCents === null ? "" : (limitCents / 100).toFixed(2);
   const [value, setValue] = useState(initial);
+
+  // Re-sync when the saved value changes under us, so the box shows what
+  // was actually stored rather than the raw keystrokes: type "500,5" and
+  // this corrects the field to "500.50" once the server confirms it.
+  // Adjusting state during render is React's own pattern for this; the
+  // alternative, an effect, would paint the stale value first.
+  const [lastSaved, setLastSaved] = useState(limitCents);
+  if (limitCents !== lastSaved) {
+    setLastSaved(limitCents);
+    setValue(initial);
+  }
 
   function save(raw: string) {
     const trimmed = raw.trim();
-    // Unchanged — don't spend a round trip on a tab-through.
-    if (trimmed === initial) return;
+    if (trimmed === initial) return; // unchanged — don't spend a round trip on a tab-through
     setError(null);
 
     startTransition(async () => {
-      if (trimmed === "") {
-        // Empty means "no budget for this category", which is not the same
-        // as budgeting zero — so remove the row rather than storing 0.
-        await clearBudget(householdId, categoryId, new Date(month));
-        router.refresh();
-        return;
-      }
-      const amount = Math.round(Number(trimmed.replace(",", ".")) * 100);
-      if (!Number.isFinite(amount) || amount < 0) {
+      // Empty means "no limit on this category", which is not the same as
+      // a limit of zero; the action stores null rather than 0.
+      const amount = trimmed === "" ? null : Math.round(Number(trimmed.replace(",", ".")) * 100);
+      if (amount !== null && (!Number.isFinite(amount) || amount < 0)) {
         setError("Enter a non-negative amount.");
         setValue(initial);
         return;
       }
-      const result = await setBudget({ householdId, categoryId, month: new Date(month), amount });
+      const result = await setBudgetLimit({ householdId, categoryId, amount });
       if (!result.ok) {
         setError(result.error);
         setValue(initial);
@@ -58,12 +62,8 @@ export function BudgetAmountInput({
   }
 
   return (
-    <form
-      action={() => save(value)}
-      className="flex items-center justify-end gap-2"
-      // Enter submits; blur below covers tabbing away without submitting.
-    >
-      <div className="flex flex-col items-end">
+    <form action={() => save(value)} className="flex flex-col items-end">
+      <div className="flex items-center gap-2">
         <input
           name="amount"
           type="text"
@@ -72,48 +72,13 @@ export function BudgetAmountInput({
           onChange={(e) => setValue(e.target.value)}
           onBlur={(e) => save(e.target.value)}
           disabled={isPending}
-          placeholder="—"
-          aria-label="Budget amount"
-          className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm focus:border-emerald-500 focus:outline-none disabled:bg-slate-50"
+          placeholder="no limit"
+          aria-label={`Monthly limit for ${categoryName}`}
+          className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm focus:border-emerald-500 focus:outline-none disabled:bg-slate-50"
         />
-        {error && <span className="mt-1 text-xs text-red-600">{error}</span>}
+        {isPending && <span className="text-xs text-slate-400">…</span>}
       </div>
-      {isPending && <span className="text-xs text-slate-400">…</span>}
+      {error && <span className="mt-1 max-w-48 text-right text-xs text-red-600">{error}</span>}
     </form>
-  );
-}
-
-export function CopyLastMonthBudgetButton({ householdId, month }: { householdId: string; month: string }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [result, setResult] = useState<string | null>(null);
-
-  function handleClick() {
-    setResult(null);
-    startTransition(async () => {
-      const { copiedCount, skippedCount } = await copyLastMonthBudget(householdId, new Date(month));
-      setResult(
-        copiedCount === 0
-          ? skippedCount > 0
-            ? "Every category from last month already has a budget here."
-            : "Last month had no budget to copy."
-          : `Copied ${copiedCount} budget${copiedCount === 1 ? "" : "s"}${skippedCount > 0 ? `, left ${skippedCount} already set` : ""}.`
-      );
-      router.refresh();
-    });
-  }
-
-  return (
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={isPending}
-        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-50"
-      >
-        {isPending ? "Copying..." : "Copy last month's budget"}
-      </button>
-      {result && <span className="text-sm text-slate-500">{result}</span>}
-    </div>
   );
 }
