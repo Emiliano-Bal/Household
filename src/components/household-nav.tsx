@@ -7,6 +7,7 @@ const HOUSEHOLD_ITEMS = [
   { href: "", label: "Dashboard" },
   { href: "/expenses", label: "Expenses" },
   { href: "/budget", label: "Budget" },
+  { href: "/countdown", label: "Countdown" },
   { href: "/recurring", label: "Recurring" },
   { href: "/income", label: "Income" },
   { href: "/savings", label: "Savings" },

@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import type { CategoryKind } from "@prisma/client";
 import { prisma } from "./db";
 import { computeBalances, computeIncomeShares, simplifySettlements, type SplitRule } from "./splitting";
-import { monthStart, addMonths } from "./month";
+import { monthStart, addMonths, daysInMonth } from "./month";
 
 export async function listHouseholds() {
   return prisma.household.findMany({ orderBy: { name: "asc" } });
@@ -532,6 +532,124 @@ export async function getBudgetPlan(householdId: string, month: Date): Promise<B
     uncategorizedActualCents,
     totalIncomeCents: dashboard.totalIncomeCents,
     previousMonthBudgetCount: previousCount,
+  };
+}
+
+export interface RunwayDay {
+  day: number;
+  spentCents: number;
+  /** Income minus everything spent on this day and every day before it. */
+  remainingCents: number;
+  /** True for days after today in the current month — no spending has happened yet, so the line stops here. */
+  isFuture: boolean;
+}
+
+export interface MonthRunway {
+  month: Date;
+  /** The month's income — what the countdown starts from. */
+  startingCents: number;
+  spentToDateCents: number;
+  remainingCents: number;
+  daysInMonth: number;
+  /** Today's date within the month; daysInMonth for a past month, 0 for a future one. */
+  elapsedDays: number;
+  daysRemaining: number;
+  isCurrentMonth: boolean;
+  isPastMonth: boolean;
+  days: RunwayDay[];
+  /** startingCents spread evenly over the month — the reference pace. */
+  evenDailyCents: number;
+  /** null before any day has elapsed, rather than a divide-by-zero 0. */
+  averageDailySpendCents: number | null;
+  /** What's left, spread over the days that remain. null once no days remain. */
+  safeDailyCents: number | null;
+  /** Where the month lands if the current average holds. null with nothing to extrapolate from. */
+  projectedEndCents: number | null;
+  biggestDay: { day: number; spentCents: number } | null;
+}
+
+/**
+ * The month as a countdown: start from income, subtract each day's spending,
+ * and report where that leaves things today and at this pace.
+ *
+ * Every expense dated in the month counts, personal ones included — this
+ * tracks money actually leaving the household, not the fair-share split.
+ * startingCents comes from getDashboardData so the figure agrees with the
+ * Dashboard, including prior-month income fallback.
+ */
+export async function getMonthRunway(householdId: string, month: Date): Promise<MonthRunway> {
+  const start = monthStart(month);
+  const end = addMonths(start, 1);
+  const totalDays = daysInMonth(start);
+
+  const [expenses, dashboard] = await Promise.all([
+    prisma.expense.findMany({
+      where: { householdId, date: { gte: start, lt: end } },
+      select: { date: true, amount: true },
+    }),
+    getDashboardData(householdId, start),
+  ]);
+
+  const now = new Date();
+  const currentMonthStart = monthStart(now);
+  const isCurrentMonth = currentMonthStart.getTime() === start.getTime();
+  const isPastMonth = start.getTime() < currentMonthStart.getTime();
+  // A past month is fully elapsed; a future one hasn't started.
+  const elapsedDays = isCurrentMonth ? now.getUTCDate() : isPastMonth ? totalDays : 0;
+  const daysRemaining = Math.max(0, totalDays - elapsedDays);
+
+  const spentByDay = new Array<number>(totalDays + 1).fill(0);
+  for (const e of expenses) {
+    // Expense dates are stored at UTC midnight, matching monthStart.
+    const day = e.date.getUTCDate();
+    if (day >= 1 && day <= totalDays) spentByDay[day] += e.amount;
+  }
+
+  const startingCents = dashboard.totalIncomeCents;
+
+  let running = startingCents;
+  const days: RunwayDay[] = [];
+  for (let day = 1; day <= totalDays; day++) {
+    running -= spentByDay[day];
+    days.push({
+      day,
+      spentCents: spentByDay[day],
+      remainingCents: running,
+      isFuture: elapsedDays > 0 ? day > elapsedDays : true,
+    });
+  }
+
+  const spentToDateCents = days
+    .filter((d) => !d.isFuture)
+    .reduce((sum, d) => sum + d.spentCents, 0);
+  const remainingCents = startingCents - spentToDateCents;
+
+  const averageDailySpendCents = elapsedDays > 0 ? Math.round(spentToDateCents / elapsedDays) : null;
+
+  let biggestDay: MonthRunway["biggestDay"] = null;
+  for (const d of days) {
+    if (d.spentCents > 0 && (biggestDay === null || d.spentCents > biggestDay.spentCents)) {
+      biggestDay = { day: d.day, spentCents: d.spentCents };
+    }
+  }
+
+  return {
+    month: start,
+    startingCents,
+    spentToDateCents,
+    remainingCents,
+    daysInMonth: totalDays,
+    elapsedDays,
+    daysRemaining,
+    isCurrentMonth,
+    isPastMonth,
+    days,
+    evenDailyCents: Math.round(startingCents / totalDays),
+    averageDailySpendCents,
+    safeDailyCents: daysRemaining > 0 ? Math.round(remainingCents / daysRemaining) : null,
+    projectedEndCents:
+      averageDailySpendCents === null ? null : startingCents - averageDailySpendCents * totalDays,
+    biggestDay,
   };
 }
 
