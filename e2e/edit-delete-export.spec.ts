@@ -66,15 +66,18 @@ async function seedExpense(label: string, amountCents: number) {
   });
 }
 
-const openDetail = async (page: Page, expenseId: string) =>
-  page.goto(`/h/${householdId}/expenses?month=${monthKey(THIS_MONTH)}&expenseId=${expenseId}`);
+const openMonth = async (page: Page, month: Date) =>
+  page.goto(`/h/${householdId}/expenses?month=${monthKey(month)}`);
+
+/** The Actions cell for one expense, by its label. */
+const rowFor = (page: Page, label: string) => page.locator("tbody tr").filter({ hasText: label });
 
 test.describe("editing an expense from the UI", () => {
   test("changes the amount and rewrites the shares", async ({ page }) => {
     const expense = await seedExpense("Editable shop", 10000);
     try {
-      await openDetail(page, expense.id);
-      await page.getByRole("link", { name: "Edit", exact: true }).click();
+      await openMonth(page, THIS_MONTH);
+      await rowFor(page, "Editable shop").getByRole("link", { name: "Edit Editable shop" }).click();
 
       const amount = page.getByRole("spinbutton", { name: "Amount" });
       await expect(amount).toHaveValue("100.00");
@@ -105,8 +108,8 @@ test.describe("editing an expense from the UI", () => {
       data: { householdId, fromMemberId: bob, toMemberId: alice, amount: 5000, date: DAY },
     });
     try {
-      await openDetail(page, expense.id);
-      await page.getByRole("link", { name: "Edit", exact: true }).click();
+      await openMonth(page, THIS_MONTH);
+      await rowFor(page, "Settled shop").getByRole("link", { name: "Edit Settled shop" }).click();
       await page.getByRole("spinbutton", { name: "Amount" }).fill("200");
       await page.getByRole("button", { name: "Save changes" }).click();
 
@@ -132,8 +135,8 @@ test.describe("editing an expense from the UI", () => {
   test("deleting asks first and then removes the expense", async ({ page }) => {
     const expense = await seedExpense("Deletable", 3000);
     try {
-      await openDetail(page, expense.id);
-      await page.getByRole("button", { name: "Delete", exact: true }).click();
+      await openMonth(page, THIS_MONTH);
+      await page.getByRole("button", { name: "Delete Deletable" }).click();
 
       await expect(page.getByText(/Delete .Deletable/)).toBeVisible();
       // Nothing gone yet.
@@ -143,13 +146,96 @@ test.describe("editing an expense from the UI", () => {
       await page.getByRole("button", { name: "Keep it" }).click();
       expect(await prisma.expense.count({ where: { id: expense.id } })).toBe(1);
 
-      await page.getByRole("button", { name: "Delete", exact: true }).click();
+      await page.getByRole("button", { name: "Delete Deletable" }).click();
       await page.getByRole("button", { name: "Delete anyway" }).click();
 
       await expect.poll(() => prisma.expense.count({ where: { id: expense.id } })).toBe(0);
       expect(await prisma.expenseShare.count({ where: { expenseId: expense.id } })).toBe(0);
     } finally {
       await prisma.expense.deleteMany({ where: { id: expense.id } });
+    }
+  });
+});
+
+test.describe("past expenses", () => {
+  // The capability was always there — updateExpense and deleteExpense
+  // never had a date gate — but it was reachable only by clicking into
+  // the detail pane, so it read as "you can only edit recurring ones".
+  const PAST = monthStart(new Date(Date.UTC(THIS_MONTH.getUTCFullYear(), THIS_MONTH.getUTCMonth() - 3, 1)));
+  const PAST_DAY = new Date(Date.UTC(PAST.getUTCFullYear(), PAST.getUTCMonth(), 12));
+
+  async function seedPast(label: string, amountCents: number) {
+    return prisma.expense.create({
+      data: {
+        householdId,
+        date: PAST_DAY,
+        label,
+        amount: amountCents,
+        categoryId,
+        paidByMemberId: alice,
+        splitRule: { type: "EQUAL" },
+        isShared: true,
+        shares: {
+          create: [
+            { memberId: alice, owedAmount: amountCents / 2 },
+            { memberId: bob, owedAmount: amountCents / 2 },
+          ],
+        },
+      },
+    });
+  }
+
+  test("a three-month-old expense can be edited from its row", async ({ page }) => {
+    const expense = await seedPast("Old mistake", 9000);
+    try {
+      await openMonth(page, PAST);
+      await expect(rowFor(page, "Old mistake")).toBeVisible();
+
+      await rowFor(page, "Old mistake").getByRole("link", { name: "Edit Old mistake" }).click();
+      await page.getByRole("spinbutton", { name: "Amount" }).fill("45");
+      await page.getByRole("button", { name: "Save changes" }).click();
+      await expect(page.getByRole("button", { name: "Add expense" })).toBeVisible();
+
+      const after = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id }, include: { shares: true } });
+      expect(after.amount).toBe(4500);
+      expect(after.shares.reduce((sum, s) => sum + s.owedAmount, 0)).toBe(4500);
+      // Still dated in the past month — editing did not drag it to today.
+      expect(after.date.toISOString().slice(0, 7)).toBe(monthKey(PAST));
+    } finally {
+      await prisma.expense.deleteMany({ where: { id: expense.id } });
+    }
+  });
+
+  test("a test entry from months ago can be deleted, staying on that month", async ({ page }) => {
+    const expense = await seedPast("Test entry to remove", 1234);
+    try {
+      await openMonth(page, PAST);
+      await page.getByRole("button", { name: "Delete Test entry to remove" }).click();
+      await page.getByRole("button", { name: "Delete anyway" }).click();
+
+      await expect.poll(() => prisma.expense.count({ where: { id: expense.id } })).toBe(0);
+      expect(await prisma.expenseShare.count({ where: { expenseId: expense.id } })).toBe(0);
+
+      // Still on the month being tidied, not bounced back to today.
+      await expect(page).toHaveURL(new RegExp(`month=${monthKey(PAST)}`));
+    } finally {
+      await prisma.expense.deleteMany({ where: { id: expense.id } });
+    }
+  });
+
+  test("every row in a past month offers both actions", async ({ page }) => {
+    const a = await seedPast("Old one", 1000);
+    const b = await seedPast("Old two", 2000);
+    try {
+      await openMonth(page, PAST);
+      const rows = page.locator("tbody tr");
+      await expect(rows).toHaveCount(2);
+      for (const label of ["Old one", "Old two"]) {
+        await expect(rowFor(page, label).getByRole("link", { name: `Edit ${label}` })).toBeVisible();
+        await expect(rowFor(page, label).getByRole("button", { name: `Delete ${label}` })).toBeVisible();
+      }
+    } finally {
+      await prisma.expense.deleteMany({ where: { id: { in: [a.id, b.id] } } });
     }
   });
 });

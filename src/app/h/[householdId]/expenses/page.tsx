@@ -124,7 +124,7 @@ export default async function ExpensesPage({
 
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex-1 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="w-full min-w-[40rem] text-sm">
+          <table className="w-full min-w-[48rem] text-sm">
             <thead>
               <tr className="text-left text-slate-400">
                 <th className="px-4 py-2 font-medium">Date</th>
@@ -133,12 +133,13 @@ export default async function ExpensesPage({
                 <th className="px-4 py-2 font-medium">Paid by</th>
                 <th className="px-4 py-2 font-medium">Split</th>
                 <th className="px-4 py-2 text-right font-medium">Amount</th>
+                <th className="px-4 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {expenses.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                     No expenses match these filters.
                   </td>
                 </tr>
@@ -163,6 +164,27 @@ export default async function ExpensesPage({
                   <td className="px-4 py-2 text-slate-500">{expense.paidBy.name}</td>
                   <td className="px-4 py-2 text-slate-500">{splitRuleLabel(expense.splitRule as SplitRule)}</td>
                   <td className="px-4 py-2 text-right font-medium text-slate-900">{formatCents(expense.amount)}</td>
+                  {/* Actions on the row itself, so any expense in any month
+                      can be corrected or removed without first knowing to
+                      click into the detail pane. `relative` anchors the
+                      delete confirmation, which floats over the row. */}
+                  <td className="relative px-4 py-2">
+                    <div className="flex items-start justify-end gap-1">
+                      <Link
+                        href={`/h/${householdId}/expenses?month=${monthStr}&expenseId=${expense.id}&edit=${expense.id}`}
+                        aria-label={`Edit ${expense.label}`}
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                      >
+                        Edit
+                      </Link>
+                      <DeleteExpenseButton
+                        householdId={householdId}
+                        expenseId={expense.id}
+                        label={expense.label}
+                        compact
+                      />
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -220,16 +242,6 @@ export default async function ExpensesPage({
                 </div>
               );
             })()}
-
-            <div className="mt-4 flex flex-wrap items-start gap-2 border-t border-slate-100 pt-4">
-              <Link
-                href={`/h/${householdId}/expenses?month=${monthStr}&expenseId=${selected.id}&edit=${selected.id}`}
-                className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Edit
-              </Link>
-              <DeleteExpenseButton householdId={householdId} expenseId={selected.id} label={selected.label} />
-            </div>
 
             <div className="mt-4">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Share breakdown</p>

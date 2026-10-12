@@ -56,12 +56,17 @@ export function DeleteExpenseButton({
   householdId,
   expenseId,
   label,
+  compact,
 }: {
   householdId: string;
   expenseId: string;
   label: string;
+  /** Table-row placement: the trigger is a plain link-sized button and the confirm floats over the row. */
+  compact?: boolean;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState(false);
   const [impact, setImpact] = useState<ExpenseChangeImpact[] | null>(null);
@@ -86,9 +91,15 @@ export function DeleteExpenseButton({
         return;
       }
       setConfirming(false);
-      // The detail pane is keyed on this id, so drop it from the URL
-      // rather than leaving a pane pointing at a deleted row.
-      router.push(`/h/${householdId}/expenses`);
+      // Stay on the month being cleaned up. Only the params that point at
+      // the row just deleted are dropped — pushing to a bare /expenses
+      // would silently throw someone tidying up March back to today.
+      const next = new URLSearchParams(searchParams.toString());
+      for (const key of ["expenseId", "edit"]) {
+        if (next.get(key) === expenseId) next.delete(key);
+      }
+      const qs = next.toString();
+      router.push(qs ? `${pathname}?${qs}` : pathname);
       router.refresh();
     });
   }
@@ -100,6 +111,7 @@ export function DeleteExpenseButton({
           type="button"
           onClick={startConfirm}
           disabled={isPending}
+          aria-label={`Delete ${label}`}
           className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
         >
           {isPending ? "Checking..." : "Delete"}
@@ -112,7 +124,13 @@ export function DeleteExpenseButton({
   const settled = impact && impact.length > 0;
 
   return (
-    <div className={`rounded-lg border p-3 ${settled ? "border-red-400 bg-red-50" : "border-slate-300 bg-slate-50"}`}>
+    <div
+      className={`rounded-lg border p-3 text-left ${settled ? "border-red-400 bg-red-50" : "border-slate-300 bg-slate-50"} ${
+        // In a table cell the confirm would squeeze the column, so it is
+        // lifted out of the flow and given a readable width of its own.
+        compact ? "absolute right-2 z-10 w-80 shadow-lg" : ""
+      }`}
+    >
       <p className={`text-sm font-medium ${settled ? "text-red-800" : "text-slate-700"}`}>
         Delete &ldquo;{label}&rdquo;?
       </p>
