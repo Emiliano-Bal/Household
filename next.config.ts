@@ -15,6 +15,22 @@ const nextConfig: NextConfig = {
       },
     },
   },
+
+  // The nav went from eight tabs to five: the countdown became a Dashboard
+  // section, and Recurring and Budget became segments inside Expenses.
+  // These keep already-shared links working.
+  //
+  // Temporary (307) rather than permanent (308) on purpose: a 308 is
+  // cached hard by browsers, and if this structure is ever revisited those
+  // stale redirects would be awkward to undo on machines that saw them.
+  // There is no SEO to preserve here that would justify that risk.
+  async redirects() {
+    return [
+      { source: "/h/:householdId/countdown", destination: "/h/:householdId", permanent: false },
+      { source: "/h/:householdId/recurring", destination: "/h/:householdId/expenses/recurring", permanent: false },
+      { source: "/h/:householdId/budget", destination: "/h/:householdId/expenses/budget", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

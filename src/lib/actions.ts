@@ -7,7 +7,7 @@ import { monthStart, addMonths } from "./month";
 import { buildStoredIncomeRatioSnapshot, computeExpenseShares, previewSettlement, type SplitRule } from "./splitting";
 import { computeHouseholdBalancesMap } from "./queries";
 import { findIncomeEditImpact, findSettlementImpact, type SettlementImpact } from "./income-impact";
-import { materializeRecurringExpense, recurringExpensesDueForMonth } from "./recurring";
+import { materializeRecurringExpenses, recurringExpensesDueForMonth, type RecurringExpenseInput } from "./recurring";
 import { DEFAULT_CATEGORIES } from "./default-categories";
 import {
   createExpenseSchema,
@@ -318,7 +318,10 @@ export async function createRecurringExpense(input: z.infer<typeof createRecurri
       categoryId: data.categoryId,
       label: data.label,
       amount: data.amount,
+      frequency: data.frequency,
+      interval: data.interval,
       dayOfMonth: data.dayOfMonth,
+      dayOfWeek: data.dayOfWeek,
       startMonth: monthStart(data.startMonth),
       endMonth: data.endMonth ? monthStart(data.endMonth) : null,
       paidByMemberId: data.paidByMemberId,
@@ -339,66 +342,93 @@ export async function setRecurringExpenseActive(id: string, householdId: string,
  * generatedForMonth) before creating, and the same pair is also a DB
  * unique constraint as a safety net against concurrent double-clicks.
  */
+/**
+ * Materialize every occurrence of every active rule that falls in this
+ * month. Idempotent per OCCURRENCE, not per month: a weekly rule has four
+ * or five in a month, and re-running only fills in what is missing.
+ */
 export async function generateRecurringForMonth(householdId: string, targetMonth: Date) {
   const target = monthStart(targetMonth);
   const recurringRows = await prisma.recurringExpense.findMany({ where: { householdId } });
-  const due = recurringExpensesDueForMonth(
-    recurringRows.map((r) => ({
-      id: r.id,
-      categoryId: r.categoryId,
-      label: r.label,
-      amount: r.amount,
-      dayOfMonth: r.dayOfMonth,
-      startMonth: r.startMonth,
-      endMonth: r.endMonth,
-      paidByMemberId: r.paidByMemberId,
-      splitRule: r.splitRule as SplitRule,
-      active: r.active,
-    })),
-    target
-  );
+  const rules: RecurringExpenseInput[] = recurringRows.map((r) => ({
+    id: r.id,
+    categoryId: r.categoryId,
+    label: r.label,
+    amount: r.amount,
+    frequency: r.frequency,
+    interval: r.interval,
+    dayOfMonth: r.dayOfMonth,
+    dayOfWeek: r.dayOfWeek,
+    startMonth: r.startMonth,
+    endMonth: r.endMonth,
+    paidByMemberId: r.paidByMemberId,
+    splitRule: r.splitRule as SplitRule,
+    active: r.active,
+  }));
+  const due = recurringExpensesDueForMonth(rules, target);
 
   const { members, incomeRecords } = await membersAndIncomeFor(householdId);
+
+  // One query for the whole month rather than one per occurrence — a
+  // weekly rule would otherwise mean five round trips per rule.
+  const alreadyGenerated = await prisma.expense.findMany({
+    where: {
+      householdId,
+      recurringExpenseId: { in: due.map((r) => r.id) },
+      occurrenceDate: { gte: target, lt: addMonths(target, 1) },
+    },
+    select: { recurringExpenseId: true, occurrenceDate: true },
+  });
+  const seen = new Set(alreadyGenerated.map((e) => `${e.recurringExpenseId}|${e.occurrenceDate!.getTime()}`));
+
   let createdCount = 0;
+  let dueCount = 0;
 
   for (const recurring of due) {
-    const existing = await prisma.expense.findFirst({
-      where: { recurringExpenseId: recurring.id, generatedForMonth: target },
-    });
-    if (existing) continue;
+    for (const draft of materializeRecurringExpenses(recurring, target)) {
+      dueCount++;
+      if (seen.has(`${draft.recurringExpenseId}|${draft.occurrenceDate.getTime()}`)) continue;
 
-    const draft = materializeRecurringExpense(recurring, target);
-    const shareResult = computeExpenseShares(draft.amount, draft.paidByMemberId, draft.splitRule, members, incomeRecords, draft.date);
-    const storedSnapshot = buildStoredIncomeRatioSnapshot(shareResult);
+      const shareResult = computeExpenseShares(
+        draft.amount,
+        draft.paidByMemberId,
+        draft.splitRule,
+        members,
+        incomeRecords,
+        draft.date
+      );
+      const storedSnapshot = buildStoredIncomeRatioSnapshot(shareResult);
 
-    try {
-      await prisma.expense.create({
-        data: {
-          householdId,
-          date: draft.date,
-          label: draft.label,
-          amount: draft.amount,
-          categoryId: draft.categoryId,
-          paidByMemberId: draft.paidByMemberId,
-          splitRule: draft.splitRule satisfies SplitRule,
-          isShared: draft.splitRule.type !== "SOLO",
-          recurringExpenseId: draft.recurringExpenseId,
-          generatedForMonth: draft.generatedForMonth,
-          incomeRatioSnapshot: (storedSnapshot as Prisma.InputJsonValue | null) ?? Prisma.JsonNull,
-          shares: { create: shareResult.shares.map((s) => ({ memberId: s.memberId, owedAmount: s.owedAmount })) },
-        },
-      });
-      createdCount++;
-    } catch (error) {
-      // P2002 = unique constraint violation: another request already
-      // generated this one between our check and our insert. Idempotency
-      // is preserved either way — just don't double-create.
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+      try {
+        await prisma.expense.create({
+          data: {
+            householdId,
+            date: draft.date,
+            label: draft.label,
+            amount: draft.amount,
+            categoryId: draft.categoryId,
+            paidByMemberId: draft.paidByMemberId,
+            splitRule: draft.splitRule satisfies SplitRule,
+            isShared: true,
+            recurringExpenseId: draft.recurringExpenseId,
+            occurrenceDate: draft.occurrenceDate,
+            incomeRatioSnapshot: (storedSnapshot as Prisma.InputJsonValue | null) ?? Prisma.JsonNull,
+            shares: { create: shareResult.shares.map((sh) => ({ memberId: sh.memberId, owedAmount: sh.owedAmount })) },
+          },
+        });
+        createdCount++;
+      } catch (error) {
+        // The unique index is the real guard: two concurrent clicks both
+        // pass the pre-check above, and the loser must be a no-op rather
+        // than an error the user sees.
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") continue;
+        throw error;
+      }
     }
   }
 
   revalidatePath(`/h/${householdId}`);
-  return { createdCount, dueCount: due.length };
+  return { createdCount, dueCount };
 }
 
 // --- Savings ------------------------------------------------------------
@@ -503,7 +533,7 @@ export async function setBudgetLimit(input: z.infer<typeof setBudgetLimitSchema>
     update: { amount: data.amount },
   });
 
-  revalidatePath(`/h/${data.householdId}/budget`);
+  revalidatePath(`/h/${data.householdId}/expenses/budget`);
   revalidatePath(`/h/${data.householdId}`);
   return { ok: true as const, limit };
 }

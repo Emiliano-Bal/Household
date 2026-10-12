@@ -21,6 +21,16 @@ datasource db {
   provider = "postgresql"
 }
 
+// How often a RecurringExpense repeats. The month-based ones all clamp a
+// day past the end of a short month onto its last day (a 31st lands on
+// Feb 28/29) rather than skipping or spilling into the next month.
+enum RecurrenceFrequency {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
 enum CategoryKind {
   FIXED
   VARIABLE
@@ -144,7 +154,22 @@ model RecurringExpense {
   category       Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   label          String
   amount         Int
-  dayOfMonth     Int
+
+  frequency RecurrenceFrequency @default(MONTHLY)
+  // Every N units of the frequency — 2 with WEEKLY is fortnightly, 2 with
+  // MONTHLY is every other month. Counted from the first occurrence on or
+  // after startMonth, so the anchor never drifts.
+  interval  Int                 @default(1)
+  // Month-based frequencies only. 29-31 is kept as written and clamped at
+  // read time, so a 31st rule still means "the 31st" in months that have one.
+  dayOfMonth Int?
+  // WEEKLY only. 0 = Sunday through 6 = Saturday, matching Date#getUTCDay.
+  dayOfWeek  Int?
+
+  // The month the series begins, and also its anchor: a QUARTERLY rule
+  // starting in February falls in February, May, August, November, and a
+  // YEARLY one repeats in its start month. There is no separate anchor
+  // field to drift out of sync with this one.
   startMonth     DateTime
   endMonth       DateTime?
   paidByMemberId String
@@ -180,11 +205,14 @@ model Expense {
   // Set only on expenses materialized from a recurring template.
   recurringExpenseId String?
   recurringExpense   RecurringExpense? @relation(fields: [recurringExpenseId], references: [id])
-  // Normalized to the 1st of the month this expense was generated for.
-  // Paired with recurringExpenseId in a unique constraint so "generate
-  // this month" can never double-materialize the same recurring expense
-  // for the same month, no matter how many times it's clicked.
-  generatedForMonth  DateTime?
+  // The exact date of the occurrence this expense materializes, paired
+  // with recurringExpenseId in a unique constraint so generation can never
+  // double-materialize the same occurrence however many times it is run.
+  //
+  // Keyed on the occurrence rather than the month because a weekly rule
+  // has four or five occurrences in a month: a per-month key would collapse
+  // them into one and silently drop the rest.
+  occurrenceDate     DateTime?
 
   // The per-member income ratios in effect on `date`, frozen at write
   // time for PROPORTIONAL splits — e.g. {"mem_a": 0.6, "mem_b": 0.4}.
@@ -198,7 +226,7 @@ model Expense {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([recurringExpenseId, generatedForMonth])
+  @@unique([recurringExpenseId, occurrenceDate])
   @@index([householdId, date])
 }
 

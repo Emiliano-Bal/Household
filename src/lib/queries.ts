@@ -165,7 +165,25 @@ export interface DashboardData {
   }>;
   fixedCents: number;
   variableCents: number;
+  /** Expenses filed under a SAVINGS-kind category. A separate record from goal contributions — see goalContributionsCents. */
   savingsCents: number;
+  /**
+   * SavingsContribution rows for the month. These are written by
+   * addSavingsContribution and never create an Expense row, so they are
+   * counted here and nowhere else — the two paths are independent records,
+   * each counted exactly once.
+   */
+  goalContributionsCents: number;
+  /** Everything that left the household this month: all expenses plus goal contributions. */
+  totalExpensesCents: number;
+  /**
+   * totalIncome − totalExpenses, with goal contributions already deducted.
+   * Negative when the household overspent; never clamped.
+   */
+  actualSavingsCents: number;
+  /** actualSavings as a percent of income. null when there is no income to divide by. */
+  savingsRatePercent: number | null;
+  /** Kept as the alias it always was: the unallocated remainder is actualSavings. */
   leftoverCents: number;
   overspend: boolean;
   incomeWarnings: Array<{
@@ -221,6 +239,15 @@ export async function getDashboardData(householdId: string, month: Date): Promis
     }
   }
 
+  // Goal contributions are money committed and gone, so they count as
+  // expenses. They come solely through SavingsContribution — nothing
+  // creates a matching Expense row — so there is no double count.
+  const goalContributionsAgg = await prisma.savingsContribution.aggregate({
+    where: { goal: { householdId }, month: start },
+    _sum: { amount: true },
+  });
+  const goalContributionsCents = goalContributionsAgg._sum.amount ?? 0;
+
   const { byMember: balances } = await getBalances(householdId);
   const balanceByMember = new Map(balances.map((b) => [b.memberId, b.balanceCents]));
 
@@ -239,7 +266,8 @@ export async function getDashboardData(householdId: string, month: Date): Promis
     };
   });
 
-  const leftoverCents = totalIncomeCents - fixedCents - variableCents - savingsCents;
+  const totalExpensesCents = fixedCents + variableCents + savingsCents + goalContributionsCents;
+  const actualSavingsCents = totalIncomeCents - totalExpensesCents;
 
   return {
     month: start,
@@ -248,8 +276,12 @@ export async function getDashboardData(householdId: string, month: Date): Promis
     fixedCents,
     variableCents,
     savingsCents,
-    leftoverCents,
-    overspend: fixedCents + variableCents + savingsCents > totalIncomeCents,
+    goalContributionsCents,
+    totalExpensesCents,
+    actualSavingsCents,
+    savingsRatePercent: totalIncomeCents > 0 ? (actualSavingsCents / totalIncomeCents) * 100 : null,
+    leftoverCents: actualSavingsCents,
+    overspend: totalExpensesCents > totalIncomeCents,
     incomeWarnings: warnings.map((w) => ({
       memberId: w.memberId,
       memberName: members.find((m) => m.id === w.memberId)?.name ?? w.memberId,

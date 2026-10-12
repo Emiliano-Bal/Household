@@ -131,7 +131,10 @@ test.describe("budget limits screen", () => {
 });
 
 function budgetSection(page: import("@playwright/test").Page) {
-  return page.locator("section").filter({ hasText: "Budget this month" });
+  // Anchored on the heading AND exact: both hasText and getByRole's name
+  // are case-insensitive substring matches by default, so the countdown
+  // widget's "Over budget this month" heading matched either one.
+  return page.locator("section").filter({ has: page.getByRole("heading", { name: "Budget this month", exact: true }) });
 }
 function budgetRow(page: import("@playwright/test").Page, category: string) {
   return budgetSection(page).locator("tbody tr").filter({ hasText: category });

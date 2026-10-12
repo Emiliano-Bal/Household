@@ -7,6 +7,15 @@ import { monthKey } from "@/lib/month";
 import { CategorySelect, type CategoryOption } from "@/components/category-select";
 
 type SplitType = "PROPORTIONAL" | "EQUAL" | "EXACT" | "PERCENTAGE" | "SOLO";
+type Frequency = "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY";
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const INTERVAL_UNIT: Record<Frequency, string> = {
+  WEEKLY: "week(s)",
+  MONTHLY: "month(s)",
+  QUARTERLY: "quarter(s)",
+  YEARLY: "year(s)",
+};
 
 export function RecurringForm({
   householdId,
@@ -21,8 +30,12 @@ export function RecurringForm({
   const [isPending, startTransition] = useTransition();
   const [splitType, setSplitType] = useState<SplitType>("PROPORTIONAL");
   const [paidBy, setPaidBy] = useState(members[0]?.id ?? "");
+  const [frequency, setFrequency] = useState<Frequency>("MONTHLY");
   const [error, setError] = useState<string | null>(null);
   const defaultStartMonth = `${monthKey(new Date())}-01`;
+  // Weekly rules are placed by weekday; the rest by day of month. Showing
+  // both at once invites filling in the one that will be ignored.
+  const isWeekly = frequency === "WEEKLY";
 
   async function onSubmit(formData: FormData) {
     setError(null);
@@ -32,6 +45,8 @@ export function RecurringForm({
     const startMonth = new Date(String(formData.get("startMonth") ?? defaultStartMonth));
     const endMonthRaw = String(formData.get("endMonth") ?? "");
     const categoryId = String(formData.get("categoryId") ?? "");
+    const interval = Math.max(1, Number(formData.get("interval") ?? 1));
+    const dayOfWeekRaw = String(formData.get("dayOfWeek") ?? "");
 
     if (!label || !amount || !categoryId) {
       setError("Label, amount, and category are required.");
@@ -56,7 +71,10 @@ export function RecurringForm({
           categoryId,
           label,
           amount,
-          dayOfMonth,
+          frequency,
+          interval,
+          dayOfMonth: isWeekly ? null : dayOfMonth,
+          dayOfWeek: isWeekly ? Number(dayOfWeekRaw || 1) : null,
           startMonth,
           endMonth: endMonthRaw ? new Date(endMonthRaw) : null,
           paidByMemberId: paidBy,
@@ -79,13 +97,72 @@ export function RecurringForm({
         <input name="label" placeholder="Label (e.g. Rent)" required className={inputClass} />
         <input name="amount" type="number" step="0.01" min="0.01" placeholder="Amount" required className={inputClass} />
         <CategorySelect categories={categories} placeholder="Category" required className={inputClass} />
-        <input name="dayOfMonth" type="number" min={1} max={31} defaultValue={1} placeholder="Day of month" className={inputClass} />
+        <select
+          name="frequency"
+          value={frequency}
+          onChange={(e) => setFrequency(e.target.value as Frequency)}
+          aria-label="Frequency"
+          className={inputClass}
+        >
+          <option value="WEEKLY">Weekly</option>
+          <option value="MONTHLY">Monthly</option>
+          <option value="QUARTERLY">Quarterly</option>
+          <option value="YEARLY">Yearly</option>
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {isWeekly ? (
+          <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+            Day of week
+            <select name="dayOfWeek" defaultValue={1} aria-label="Day of week" className={inputClass}>
+              {WEEKDAYS.map((d, i) => (
+                <option key={d} value={i}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+            Day of month
+            <input
+              name="dayOfMonth"
+              type="number"
+              min={1}
+              max={31}
+              defaultValue={1}
+              aria-label="Day of month"
+              className={inputClass}
+            />
+          </label>
+        )}
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+          Repeat every
+          <div className="flex items-center gap-2">
+            <input
+              name="interval"
+              type="number"
+              min={1}
+              max={52}
+              defaultValue={1}
+              aria-label="Repeat interval"
+              className={`${inputClass} w-20`}
+            />
+            <span className="text-xs text-slate-400">{INTERVAL_UNIT[frequency]}</span>
+          </div>
+        </label>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
           Starts
-          <input name="startMonth" type="month" defaultValue={monthKey(new Date())} className={inputClass} />
+          <input name="startMonth" type="month" defaultValue={monthKey(new Date())} aria-label="Start month" className={inputClass} />
+          {(frequency === "QUARTERLY" || frequency === "YEARLY") && (
+            <span className="text-xs font-normal text-slate-400">
+              {frequency === "QUARTERLY" ? "and every 3rd month after" : "and the same month each year"}
+            </span>
+          )}
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
           Ends (optional)

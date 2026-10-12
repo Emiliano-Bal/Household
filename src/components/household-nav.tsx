@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+// Five tabs, not eight. The countdown is a Dashboard section, and
+// Recurring and Budget are segments inside Expenses — all three of those
+// are "money going out", so they belong behind one tab.
 const HOUSEHOLD_ITEMS = [
   { href: "", label: "Dashboard" },
   { href: "/expenses", label: "Expenses" },
-  { href: "/budget", label: "Budget" },
-  { href: "/countdown", label: "Countdown" },
-  { href: "/recurring", label: "Recurring" },
   { href: "/income", label: "Income" },
   { href: "/savings", label: "Savings" },
   { href: "/settle-up", label: "Settle Up" },

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getDashboardData, getHousehold, getBalances, getBudgetStatus } from "@/lib/queries";
+import { getDashboardData, getHousehold, getBalances, getBudgetStatus, getMonthRunway } from "@/lib/queries";
+import { CountdownWidget } from "@/components/countdown-widget";
 import { describeBalance, formatCents, formatPercent } from "@/lib/money";
 import { monthStart, monthKey } from "@/lib/month";
 import { MonthNav } from "@/components/month-nav";
@@ -24,14 +25,18 @@ export default async function DashboardPage({
   const { month: monthParam } = await searchParams;
   const month = parseMonth(monthParam);
 
-  const [household, dashboard, balances, budget] = await Promise.all([
+  const [household, dashboard, balances, budget, runway] = await Promise.all([
     getHousehold(householdId),
     getDashboardData(householdId, month),
     getBalances(householdId),
     getBudgetStatus(householdId, month),
+    getMonthRunway(householdId, month),
   ]);
 
   if (!household) return null;
+
+  // Never clamped: a negative figure is the point when the month overspent.
+  const saved = dashboard.actualSavingsCents;
 
   return (
     <div className="flex flex-col gap-8">
@@ -87,17 +92,63 @@ export default async function DashboardPage({
         />
       </section>
 
+      <CountdownWidget householdId={householdId} runway={runway} />
+
       <section className="rounded-lg border border-slate-200 bg-white p-5">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Leftover / unallocated</h2>
-        <p className={`mt-1 text-2xl font-semibold ${dashboard.leftoverCents < 0 ? "text-red-600" : "text-emerald-600"}`}>
-          {formatCents(dashboard.leftoverCents)}
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">
+            {saved < 0 ? "Overspent this month" : "Saved this month"}
+          </h2>
+          <span className="text-sm text-slate-400">income less everything that went out</span>
+        </div>
+        <p className={`mt-1 text-3xl font-semibold ${saved < 0 ? "text-red-600" : "text-emerald-600"}`}>
+          {formatCents(saved)}
         </p>
+        <p className="mt-1 text-sm text-slate-500">
+          {dashboard.savingsRatePercent === null ? (
+            "No income on record this month, so there is no rate to compute."
+          ) : (
+            <>
+              Savings rate{" "}
+              <span className={`font-medium ${saved < 0 ? "text-red-600" : "text-emerald-700"}`}>
+                {formatPercent(dashboard.savingsRatePercent, undefined, 1)}
+              </span>{" "}
+              of {formatCents(dashboard.totalIncomeCents)} income
+            </>
+          )}
+        </p>
+
+        <dl className="mt-4 divide-y divide-slate-100 border-t border-slate-100 text-sm">
+          <Line label="Income" value={formatCents(dashboard.totalIncomeCents)} />
+          <Line label="Fixed expenses" value={`− ${formatCents(dashboard.fixedCents)}`} muted />
+          <Line label="Variable expenses" value={`− ${formatCents(dashboard.variableCents)}`} muted />
+          {dashboard.savingsCents > 0 && (
+            <Line label="Savings-category expenses" value={`− ${formatCents(dashboard.savingsCents)}`} muted />
+          )}
+          <Line
+            label="Goal contributions"
+            value={`− ${formatCents(dashboard.goalContributionsCents)}`}
+            muted
+            hint="money committed to a savings goal — gone from this month's leftover"
+          />
+          <Line label={saved < 0 ? "Shortfall" : "Unallocated leftover"} value={formatCents(saved)} strong />
+        </dl>
+
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Breakdown label="Deliberate goal contributions" value={formatCents(dashboard.goalContributionsCents)} />
+          <Breakdown label="Unallocated leftover" value={formatCents(saved)} tone={saved < 0 ? "bad" : "good"} />
+          <Breakdown
+            label="Total set aside"
+            value={formatCents(dashboard.goalContributionsCents + saved)}
+            hint="contributions plus whatever was left over"
+          />
+        </div>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-3">
           <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Budget this month</h2>
-          <Link href={`/h/${householdId}/budget`} className="text-xs font-medium text-slate-400 hover:text-slate-600">
+          <Link href={`/h/${householdId}/expenses/budget`} className="text-xs font-medium text-slate-400 hover:text-slate-600">
             Adjust limits &rarr;
           </Link>
         </div>
@@ -105,14 +156,15 @@ export default async function DashboardPage({
         {budget.rows.length === 0 ? (
           <p className="px-5 py-4 text-sm text-slate-400">
             No spending limits set yet.{" "}
-            <Link href={`/h/${householdId}/budget`} className="font-medium text-slate-600 underline">
+            <Link href={`/h/${householdId}/expenses/budget`} className="font-medium text-slate-600 underline">
               Set one
             </Link>{" "}
             for a variable category — Groceries, Eating Out — and the month&apos;s progress against it shows here.
           </p>
         ) : (
           <>
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[34rem] text-sm">
               <thead>
                 <tr className="text-left text-slate-400">
                   <th className="px-5 py-2 font-medium">Category</th>
@@ -166,6 +218,7 @@ export default async function DashboardPage({
                 </tr>
               </tfoot>
             </table>
+            </div>
             {budget.unlimitedVariableCents > 0 && (
               <p className="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">
                 A further{" "}
@@ -182,7 +235,8 @@ export default async function DashboardPage({
         <h2 className="border-b border-slate-200 px-5 py-3 text-sm font-medium uppercase tracking-wide text-slate-400">
           Per member
         </h2>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[46rem] text-sm">
           <thead>
             <tr className="text-left text-slate-400">
               <th className="px-5 py-2 font-medium">Member</th>
@@ -225,6 +279,7 @@ export default async function DashboardPage({
             ))}
           </tbody>
         </table>
+        </div>
       </section>
 
       {balances.suggestedTransfers.length > 0 && (
@@ -290,6 +345,43 @@ export default async function DashboardPage({
           Go to Income
         </Link>
       </div>
+    </div>
+  );
+}
+
+function Line({
+  label,
+  value,
+  muted,
+  strong,
+  hint,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  strong?: boolean;
+  hint?: string;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-2">
+      <dt className={strong ? "font-medium text-slate-800" : "text-slate-500"}>
+        {label}
+        {hint && <span className="ml-2 text-xs text-slate-400">{hint}</span>}
+      </dt>
+      <dd className={`tabular-nums ${strong ? "font-semibold text-slate-900" : muted ? "text-slate-500" : "text-slate-700"}`}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function Breakdown({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" }) {
+  const toneClass = tone === "bad" ? "text-red-600" : tone === "good" ? "text-emerald-600" : "text-slate-900";
+  return (
+    <div className="rounded-md bg-slate-50 px-3 py-2">
+      <p className="text-xs text-slate-400">{label}</p>
+      <p className={`font-semibold tabular-nums ${toneClass}`}>{value}</p>
+      {hint && <p className="mt-0.5 text-xs text-slate-400">{hint}</p>}
     </div>
   );
 }
