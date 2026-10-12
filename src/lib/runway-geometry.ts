@@ -19,6 +19,12 @@ export interface RunwayGeometry {
   gridlines: Array<{ cents: number; cy: number }>;
   xTicks: Array<{ day: number; cx: number }>;
   pace: { x1: number; y1: number; x2: number; y2: number };
+  /**
+   * Where to put the "even pace" label. Anchored two-thirds along the line
+   * rather than at its end: the line ends at zero, which is exactly where
+   * the x-axis tick labels sit, and the two collided.
+   */
+  paceLabel: { cx: number; cy: number };
   /** Pixel y of the zero line, or null when the balance never goes negative. */
   zeroY: number | null;
   endRemainingCents: number;
@@ -89,6 +95,10 @@ export function buildRunwayGeometry({
       x2: xForDay(totalDays),
       y2: yForCents(startingCents - evenDailyCents * totalDays),
     },
+    paceLabel: (() => {
+      const day = Math.round(totalDays * 0.66);
+      return { cx: xForDay(day), cy: yForCents(startingCents - evenDailyCents * day) - 8 };
+    })(),
     zeroY: lowest < 0 ? yForCents(0) : null,
     endRemainingCents,
     over: endRemainingCents < 0,

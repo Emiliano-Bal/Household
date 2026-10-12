@@ -92,7 +92,7 @@ export function RunwayChart({
 
         {/* Reference pace: dashed because it is a target, not a gridline. */}
         <line x1={g.pace.x1} y1={g.pace.y1} x2={g.pace.x2} y2={g.pace.y2} stroke={MUTED} strokeWidth={1.5} strokeDasharray="4 4" />
-        <text x={g.pace.x2} y={g.pace.y2 - 6} textAnchor="end" fontSize={10} fill={MUTED}>
+        <text x={g.paceLabel.cx} y={g.paceLabel.cy} textAnchor="middle" fontSize={10} fill={MUTED}>
           even pace
         </text>
 

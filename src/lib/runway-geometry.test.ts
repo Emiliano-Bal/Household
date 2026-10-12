@@ -135,3 +135,22 @@ describe("runway chart geometry", () => {
     expect(g.linePoints).not.toContain("NaN");
   });
 });
+
+describe("pace label placement", () => {
+  // Caught by looking at the render: anchored at the line's end, this label
+  // sat directly on top of the last x-axis tick labels.
+  it("keeps the pace label clear of the x-axis tick labels", () => {
+    for (const totalDays of [28, 30, 31]) {
+      const g = buildRunwayGeometry({
+        days: month({ 2: 15000 }, 520000, 12, totalDays),
+        startingCents: 520000,
+        evenDailyCents: Math.round(520000 / totalDays),
+      });
+      // Tick labels are baselined at VIEW_H - 8; keep a clear band above them.
+      expect(g.paceLabel.cy).toBeLessThan(VIEW_H - PAD.bottom - 6);
+      // And inside the plot horizontally, not hanging off either edge.
+      expect(g.paceLabel.cx).toBeGreaterThan(PAD.left + 20);
+      expect(g.paceLabel.cx).toBeLessThan(VIEW_W - PAD.right - 20);
+    }
+  });
+});
