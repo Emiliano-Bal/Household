@@ -11,6 +11,7 @@ import { materializeRecurringExpense, recurringExpensesDueForMonth } from "./rec
 import { DEFAULT_CATEGORIES } from "./default-categories";
 import {
   createExpenseSchema,
+  setBudgetSchema,
   updateExpenseSchema,
   createRecurringExpenseSchema,
   incomeRecordSchema,
@@ -464,4 +465,66 @@ export async function deleteSettlement(settlementId: string, householdId: string
   // exactly, by construction, with no separate "undo" logic needed.
   await prisma.settlement.delete({ where: { id: settlementId } });
   revalidatePath(`/h/${householdId}`);
+}
+
+// --- Budgets --------------------------------------------------------------
+
+export async function setBudget(input: z.infer<typeof setBudgetSchema>) {
+  const data = setBudgetSchema.parse(input);
+  const month = monthStart(data.month);
+
+  // Guard the category against cross-household writes: categoryId comes
+  // from a form field, and the unique constraint is on (categoryId, month)
+  // alone, so nothing else here would stop a budget being written onto
+  // another household's category.
+  const category = await prisma.category.findFirst({
+    where: { id: data.categoryId, householdId: data.householdId },
+    select: { id: true },
+  });
+  if (!category) return { ok: false as const, error: "That category does not belong to this household." };
+
+  const budget = await prisma.budget.upsert({
+    where: { categoryId_month: { categoryId: data.categoryId, month } },
+    create: { householdId: data.householdId, categoryId: data.categoryId, month, amount: data.amount },
+    update: { amount: data.amount },
+  });
+
+  revalidatePath(`/h/${data.householdId}/budget`);
+  revalidatePath(`/h/${data.householdId}`);
+  return { ok: true as const, budget };
+}
+
+/** Removing the row is distinct from setting it to 0: no row means "unbudgeted", 0 means "deliberately nothing". */
+export async function clearBudget(householdId: string, categoryId: string, month: Date) {
+  await prisma.budget.deleteMany({ where: { householdId, categoryId, month: monthStart(month) } });
+  revalidatePath(`/h/${householdId}/budget`);
+  revalidatePath(`/h/${householdId}`);
+}
+
+export async function copyLastMonthBudget(householdId: string, targetMonth: Date) {
+  const target = monthStart(targetMonth);
+  const previous = addMonths(target, -1);
+
+  const [previousBudgets, existingTarget] = await Promise.all([
+    prisma.budget.findMany({ where: { householdId, month: previous } }),
+    prisma.budget.findMany({ where: { householdId, month: target }, select: { categoryId: true } }),
+  ]);
+
+  const alreadySet = new Set(existingTarget.map((b) => b.categoryId));
+  const toCreate = previousBudgets.filter((b) => !alreadySet.has(b.categoryId));
+
+  if (toCreate.length > 0) {
+    await prisma.budget.createMany({
+      data: toCreate.map((b) => ({
+        householdId,
+        categoryId: b.categoryId,
+        month: target,
+        amount: b.amount,
+      })),
+    });
+  }
+
+  revalidatePath(`/h/${householdId}/budget`);
+  revalidatePath(`/h/${householdId}`);
+  return { copiedCount: toCreate.length, skippedCount: previousBudgets.length - toCreate.length };
 }

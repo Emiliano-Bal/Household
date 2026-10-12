@@ -76,3 +76,12 @@ export const createSettlementSchema = z
     message: "Payer and payee must be different members.",
     path: ["toMemberId"],
   });
+
+// amount is allowed to be 0 — "budgeted nothing for this category this
+// month" is a meaningful plan, distinct from having no budget row at all.
+export const setBudgetSchema = z.object({
+  householdId: z.string().min(1),
+  categoryId: z.string().min(1),
+  month: z.coerce.date(),
+  amount: z.number().int().min(0),
+});

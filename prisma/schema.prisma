@@ -34,6 +34,7 @@ model Household {
   createdAt    DateTime @default(now())
 
   members           Member[]
+  budgets           Budget[]
   categories        Category[]
   expenses          Expense[]
   recurringExpenses RecurringExpense[]
@@ -93,8 +94,36 @@ model Category {
 
   recurringExpenses RecurringExpense[]
   expenses          Expense[]
+  budgets           Budget[]
 
   @@index([householdId])
+}
+
+// A planned spending ceiling for one category in one month — "300 for
+// restaurants in October". Stored per month rather than as a single
+// standing amount so that raising November's grocery budget doesn't
+// retroactively change what October was measured against. Months with no
+// rows have no budget; copyLastMonthBudget materializes them explicitly
+// rather than silently inheriting, since nothing in the app computes
+// against a budget the way splitting computes against income.
+model Budget {
+  id          String    @id @default(cuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  categoryId  String
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  // Normalized to the 1st of the month at midnight UTC, as everywhere else.
+  month       DateTime
+  amount      Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // One budget per category per month; setBudget upserts on this.
+  @@unique([categoryId, month])
+  // householdId is denormalized (reachable via category) so the budget
+  // plan for a month is one indexed query instead of a join through
+  // every category in the household.
+  @@index([householdId, month])
 }
 
 // A template that "generate this month" materializes into real Expense
