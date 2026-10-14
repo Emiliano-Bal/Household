@@ -76,6 +76,37 @@ export async function createCategory(householdId: string, name: string, kind: "F
   return category;
 }
 
+/**
+ * Rename a category or change its kind.
+ *
+ * Kind is a property of the CATEGORY, not frozen onto each expense, so
+ * changing it reclassifies that category's spending in every month —
+ * past ones included. That is deliberate: it is the only way to correct a
+ * category that was filed as Variable when it is really a fixed
+ * commitment. No money moves; only which bucket it is reported in.
+ */
+export async function updateCategory(
+  householdId: string,
+  categoryId: string,
+  data: { name?: string; kind?: "FIXED" | "VARIABLE" | "SAVINGS" }
+) {
+  const owned = await prisma.category.findFirst({ where: { id: categoryId, householdId }, select: { id: true } });
+  if (!owned) return { ok: false as const, error: "That category does not belong to this household." };
+
+  const name = data.name?.trim();
+  if (data.name !== undefined && !name) return { ok: false as const, error: "A category needs a name." };
+
+  const updated = await prisma.category.update({
+    where: { id: categoryId },
+    data: { ...(name ? { name } : {}), ...(data.kind ? { kind: data.kind } : {}) },
+  });
+
+  revalidatePath(`/h/${householdId}`);
+  revalidatePath(`/h/${householdId}/expenses`);
+  revalidatePath(`/h/${householdId}/expenses/budget`);
+  return { ok: true as const, category: updated };
+}
+
 // --- Expenses -------------------------------------------------------------
 
 export async function createExpense(input: z.infer<typeof createExpenseSchema>) {

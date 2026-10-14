@@ -1,3 +1,4 @@
+import { cache } from "react";
 import Decimal from "decimal.js";
 import type { CategoryKind } from "@prisma/client";
 import { prisma } from "./db";
@@ -8,12 +9,22 @@ export async function listHouseholds() {
   return prisma.household.findMany({ orderBy: { name: "asc" } });
 }
 
-export async function getHousehold(householdId: string) {
+/**
+ * Several of these are called more than once while rendering a single
+ * page — the layout and the page both want the household, and
+ * getDashboardData is reached directly and again through getMonthRunway.
+ * React's cache() collapses those into one query per request.
+ *
+ * Keys must be primitives: cache() compares arguments by identity, so a
+ * Date would miss every time. The month-taking functions below hash on an
+ * ISO string and keep their Date-shaped public signature.
+ */
+export const getHousehold = cache(async function getHousehold(householdId: string) {
   return prisma.household.findUnique({
     where: { id: householdId },
     include: { members: { orderBy: { name: "asc" } } },
   });
-}
+})
 
 export async function listCategories(householdId: string) {
   return prisma.category.findMany({ where: { householdId }, orderBy: { name: "asc" } });
@@ -107,7 +118,7 @@ export async function listSettlements(householdId: string) {
 // Exported separately from getBalances (which formats it with names) so
 // actions.ts can get the raw Map for previewSettlement without a second,
 // differently-shaped implementation of the same balance computation.
-export async function computeHouseholdBalancesMap(householdId: string) {
+export const computeHouseholdBalancesMap = cache(async function computeHouseholdBalancesMap(householdId: string) {
   const [expenses, settlements] = await Promise.all([
     prisma.expense.findMany({
       where: { householdId },
@@ -120,9 +131,9 @@ export async function computeHouseholdBalancesMap(householdId: string) {
     expenses.map((e) => ({ id: e.id, paidByMemberId: e.paidByMemberId, isShared: e.isShared, shares: e.shares })),
     settlements.map((s) => ({ fromMemberId: s.fromMemberId, toMemberId: s.toMemberId, amountCents: s.amount }))
   );
-}
+})
 
-export async function getBalances(householdId: string) {
+export const getBalances = cache(async function getBalances(householdId: string) {
   const [balances, members] = await Promise.all([
     computeHouseholdBalancesMap(householdId),
     prisma.member.findMany({ where: { householdId }, select: { id: true, name: true } }),
@@ -141,7 +152,7 @@ export async function getBalances(householdId: string) {
   }));
 
   return { byMember, suggestedTransfers };
-}
+})
 
 export interface DashboardData {
   month: Date;
@@ -198,8 +209,11 @@ export interface DashboardData {
   usedEqualSplitFallback: boolean;
 }
 
-export async function getDashboardData(householdId: string, month: Date): Promise<DashboardData> {
-  const start = monthStart(month);
+const getDashboardDataForMonth = cache(async function getDashboardDataForMonth(
+  householdId: string,
+  monthIso: string
+): Promise<DashboardData> {
+  const start = new Date(monthIso);
   const end = addMonths(start, 1);
 
   const [members, incomeRecords, expenses] = await Promise.all([
@@ -292,6 +306,11 @@ export async function getDashboardData(householdId: string, month: Date): Promis
     })),
     usedEqualSplitFallback,
   };
+})
+
+/** Public signature stays Date-shaped; the cache key is the normalized month. */
+export function getDashboardData(householdId: string, month: Date): Promise<DashboardData> {
+  return getDashboardDataForMonth(householdId, monthStart(month).toISOString());
 }
 
 export interface MemberDashboardData {

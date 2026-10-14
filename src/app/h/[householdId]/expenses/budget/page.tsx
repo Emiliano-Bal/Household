@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { getBudgetLimits, getHousehold } from "@/lib/queries";
+import { getBudgetLimits, getHousehold, listCategories } from "@/lib/queries";
 import { formatCents } from "@/lib/money";
 import { monthStart, monthKey } from "@/lib/month";
 import { BudgetLimitInput } from "@/components/budget-forms";
 import { CategoryQuickAdd } from "@/components/household-setup";
+import { CategoryKindEditor } from "@/components/category-kind-editor";
 
 export default async function BudgetPage({ params }: { params: Promise<{ householdId: string }> }) {
   const { householdId } = await params;
@@ -11,7 +12,11 @@ export default async function BudgetPage({ params }: { params: Promise<{ househo
   // navigation: editing sets the limit from the current month onward.
   const thisMonth = monthStart(new Date());
 
-  const [household, limits] = await Promise.all([getHousehold(householdId), getBudgetLimits(householdId, thisMonth)]);
+  const [household, limits, categories] = await Promise.all([
+    getHousehold(householdId),
+    getBudgetLimits(householdId, thisMonth),
+    listCategories(householdId),
+  ]);
   if (!household) return null;
 
   const totalCents = limits.reduce((sum, l) => sum + (l.limitCents ?? 0), 0);
@@ -81,6 +86,40 @@ export default async function BudgetPage({ params }: { params: Promise<{ househo
           </p>
         </section>
       )}
+
+      <section className="rounded-lg border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-5 py-3">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">All categories</h2>
+          <p className="mt-1 text-xs text-slate-400">
+            A category&apos;s kind decides which total its spending lands in on the Dashboard — Fixed, Variable or
+            Savings — and only Variable ones can carry a limit. If a standing commitment is showing up under variable
+            spending, it is filed under a Variable category; change it here.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[26rem] text-sm">
+            <tbody>
+              {categories.map((category) => (
+                <tr key={category.id} className="border-b border-slate-100 last:border-b-0">
+                  <td className="px-5 py-2 font-medium text-slate-800">{category.name}</td>
+                  <td className="w-40 px-5 py-2 text-right">
+                    <CategoryKindEditor
+                      householdId={householdId}
+                      categoryId={category.id}
+                      categoryName={category.name}
+                      kind={category.kind}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="border-t border-slate-200 px-5 py-3 text-xs text-slate-400">
+          Changing a kind reclassifies that category&apos;s spending in every month, past ones included. No money
+          moves — only which total it is counted in.
+        </p>
+      </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-slate-300 px-4 py-3">
         <span className="text-xs text-slate-400">Need a category you don&apos;t see — &ldquo;Cinema&rdquo;, say?</span>
