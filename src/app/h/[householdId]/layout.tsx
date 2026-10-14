@@ -17,14 +17,14 @@ export default async function HouseholdLayout({
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
           <div>
             <Link href="/" className="text-xs font-medium text-slate-400 hover:text-slate-600">
               &larr; All households
             </Link>
-            <h1 className="text-lg font-semibold text-slate-900">{household.name}</h1>
+            <h1 className="truncate text-base font-semibold text-slate-900 sm:text-lg">{household.name}</h1>
           </div>
-          <div className="text-xs text-slate-400">
+          <div className="hidden shrink-0 text-xs text-slate-400 sm:block">
             {household.members.filter((m) => m.active).length} active member
             {household.members.filter((m) => m.active).length === 1 ? "" : "s"}
           </div>
@@ -34,7 +34,7 @@ export default async function HouseholdLayout({
           members={household.members.map((m) => ({ id: m.id, name: m.name, active: m.active }))}
         />
       </header>
-      <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
+      <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6 sm:py-8">{children}</main>
     </div>
   );
 }

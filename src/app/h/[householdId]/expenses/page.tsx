@@ -94,7 +94,9 @@ export default async function ExpensesPage({
     <div className="flex flex-col gap-6">
       <MonthNav householdId={householdId} month={month} basePath="/expenses" />
 
-      <form method="get" className="flex flex-wrap items-center gap-2">
+      {/* Two-up on a phone rather than one control per line; the filters
+          are secondary to the list and should not push it below the fold. */}
+      <form method="get" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
         <input type="hidden" name="month" value={monthStr} />
         <select name="categoryId" defaultValue={sp.categoryId ?? ""} className={filterClass}>
           <option value="">All categories</option>
@@ -118,12 +120,59 @@ export default async function ExpensesPage({
           <option value="personal">Personal only</option>
         </select>
         <button type="submit" className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100">
-          Apply filters
+          Apply
         </button>
       </form>
 
       <div className="flex flex-col gap-6 lg:flex-row">
-        <div className="flex-1 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        {/* A seven-column table on a 390px screen pushes the amount — the
+            thing you actually came to read — off the right edge. Phones get
+            one card per expense instead; the table returns at md. */}
+        <ul className="flex flex-1 flex-col gap-2 md:hidden">
+          {expenses.length === 0 && (
+            <li className="rounded-lg border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-400">
+              No expenses match these filters.
+            </li>
+          )}
+          {expenses.map((expense) => (
+            <li key={expense.id} className="relative rounded-lg border border-slate-200 bg-white p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Link
+                    href={`/h/${householdId}/expenses?month=${monthStr}&expenseId=${expense.id}`}
+                    className="block truncate font-medium text-slate-900"
+                  >
+                    {expense.label}
+                  </Link>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {expense.date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}
+                    {" · "}
+                    {expense.category?.name ?? "No category"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    {expense.paidBy.name} paid · {splitRuleLabel(expense.splitRule as SplitRule)}
+                    {!expense.isShared && " · personal"}
+                  </p>
+                </div>
+                <span className="shrink-0 text-base font-semibold tabular-nums text-slate-900">
+                  {formatCents(expense.amount)}
+                </span>
+              </div>
+              <div className="mt-2 flex items-start gap-1 border-t border-slate-100 pt-2">
+                <Link
+                  href={`/h/${householdId}/expenses?month=${monthStr}&expenseId=${expense.id}&edit=${expense.id}`}
+                  aria-label={`Edit ${expense.label}`}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700"
+                >
+                  Edit
+                </Link>
+                <DeleteExpenseButton householdId={householdId} expenseId={expense.id} label={expense.label} compact />
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        <div className="hidden flex-1 overflow-x-auto rounded-lg border border-slate-200 bg-white md:block">
           <table className="w-full min-w-[48rem] text-sm">
             <thead>
               <tr className="text-left text-slate-400">
@@ -299,4 +348,5 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-const filterClass = "rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none";
+const filterClass =
+  "w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-emerald-500 focus:outline-none sm:w-auto sm:px-3";

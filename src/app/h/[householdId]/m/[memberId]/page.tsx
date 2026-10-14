@@ -70,7 +70,7 @@ export default async function MemberPage({
         </p>
       )}
 
-      <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <StatCard
           label="Income"
           value={formatCents(summary.incomeCents)}
@@ -90,7 +90,7 @@ export default async function MemberPage({
         />
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
         <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Total outstanding</h2>
         <p
           className={`mt-1 text-2xl font-semibold ${
@@ -104,7 +104,7 @@ export default async function MemberPage({
         </p>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
         <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Fair share by type</h2>
         <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
           <Row label="Fixed" value={formatCents(shareByKind.fixedCents)} />

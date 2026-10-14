@@ -38,8 +38,14 @@ export default async function DashboardPage({
   // Never clamped: a negative figure is the point when the month overspent.
   const saved = dashboard.actualSavingsCents;
 
+  // The closing stretch of the current month, and only if money is
+  // actually owed — a reminder that fires every month regardless of
+  // whether there is anything to pay is one people stop reading.
+  const settleUpDue =
+    runway.isCurrentMonth && runway.daysRemaining <= 5 && balances.suggestedTransfers.length > 0;
+
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-5 sm:gap-8">
       <MonthNav householdId={householdId} month={month} basePath="" />
 
       {dashboard.usedEqualSplitFallback && (
@@ -73,7 +79,7 @@ export default async function DashboardPage({
         </div>
       )}
 
-      <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <StatCard label="Household income" value={formatCents(dashboard.totalIncomeCents)} />
         <StatCard
           label="Fixed expenses"
@@ -92,9 +98,38 @@ export default async function DashboardPage({
         />
       </section>
 
+      {/* End-of-month settle-up prompt. Everything it needs is already
+          computed for this page, so it costs no extra query: it appears in
+          the closing days of the month, and only when somebody actually
+          owes somebody. */}
+      {settleUpDue && (
+        <section className="rounded-lg border-2 border-amber-400 bg-amber-50 p-4 sm:p-5">
+          <h2 className="text-sm font-semibold text-amber-900">
+            {runway.daysRemaining === 0
+              ? "Last day of the month — time to settle up"
+              : `${runway.daysRemaining} day${runway.daysRemaining === 1 ? "" : "s"} left this month — time to settle up`}
+          </h2>
+          <ul className="mt-2 flex flex-col gap-1 text-sm text-amber-900">
+            {balances.suggestedTransfers.map((t, i) => (
+              <li key={i}>
+                <span className="font-semibold">{t.fromName}</span> pays{" "}
+                <span className="font-semibold">{t.toName}</span>{" "}
+                <span className="font-semibold tabular-nums">{formatCents(t.amountCents)}</span>
+              </li>
+            ))}
+          </ul>
+          <Link
+            href={`/h/${householdId}/settle-up`}
+            className="mt-3 inline-block rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
+          >
+            Go to Settle Up
+          </Link>
+        </section>
+      )}
+
       <CountdownWidget householdId={householdId} runway={runway} />
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">
             {saved < 0 ? "Overspent this month" : "Saved this month"}
@@ -283,7 +318,7 @@ export default async function DashboardPage({
       </section>
 
       {balances.suggestedTransfers.length > 0 && (
-        <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
           <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Settle up</h2>
           <ul className="mt-3 flex flex-col gap-2 text-sm">
             {balances.suggestedTransfers.map((t, i) => (
@@ -307,7 +342,7 @@ export default async function DashboardPage({
         </section>
       )}
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
         <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Household members</h2>
         <ul className="mt-2 flex flex-wrap gap-2 text-sm">
           {household.members.map((m) => (
@@ -331,7 +366,7 @@ export default async function DashboardPage({
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
         <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">Export / backup</h2>
         <p className="mt-1 text-xs text-slate-400">
           Everything this household holds, as CSV. Works regardless of hosting — keep a copy somewhere you control.
@@ -411,10 +446,12 @@ function Breakdown({ label, value, hint, tone }: { label: string; value: string;
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-1 text-xl font-semibold text-slate-900">{value}</p>
-      {sub && <p className="text-xs text-slate-400">{sub}</p>}
+    <div className="flex flex-col rounded-lg border border-slate-200 bg-white p-3 sm:p-4">
+      <p className="text-[11px] font-medium uppercase leading-tight tracking-wide text-slate-400 sm:text-xs">
+        {label}
+      </p>
+      <p className="mt-1 text-lg font-semibold tabular-nums text-slate-900 sm:text-xl">{value}</p>
+      {sub && <p className="mt-auto pt-0.5 text-[11px] text-slate-400 sm:text-xs">{sub}</p>}
     </div>
   );
 }

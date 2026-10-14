@@ -23,7 +23,7 @@ export function CountdownWidget({ householdId, runway }: { householdId: string; 
   const spentDays = runway.days.filter((d) => d.spentCents > 0);
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5">
+    <section className="rounded-lg border border-slate-200 bg-white p-4 sm:p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-medium uppercase tracking-wide text-slate-400">
           {over ? "Over budget this month" : runway.isCurrentMonth ? "Left to spend this month" : "Left at month end"}

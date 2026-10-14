@@ -22,7 +22,7 @@ export function ExpensesSegments({ householdId }: { householdId: string }) {
   const month = searchParams.get("month");
 
   return (
-    <nav className="flex flex-wrap gap-1 border-b border-slate-200" aria-label="Expenses sections">
+    <nav className="no-scrollbar -mx-4 flex gap-1 overflow-x-auto border-b border-slate-200 px-4 sm:mx-0 sm:flex-wrap sm:px-0" aria-label="Expenses sections">
       {SEGMENTS.map((segment) => {
         const full = `${base}${segment.href}`;
         const active = segment.href === "" ? pathname === base : pathname === full || pathname.startsWith(`${full}/`);
@@ -32,7 +32,7 @@ export function ExpensesSegments({ householdId }: { householdId: string }) {
             key={segment.label}
             href={href}
             aria-current={active ? "page" : undefined}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition sm:px-4 ${
               active
                 ? "border-emerald-600 text-emerald-700"
                 : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-900"

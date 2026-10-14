@@ -34,8 +34,11 @@ export function HouseholdNav({
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6">
-      <nav className="flex flex-wrap gap-1">
+    <div className="mx-auto max-w-5xl px-4 sm:px-6">
+      {/* One row that scrolls sideways rather than wrapping onto two:
+          five tabs wrapped to a second line on a phone and cost a whole
+          row of an already short screen. */}
+      <nav className="no-scrollbar -mx-4 flex gap-1 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0">
         {HOUSEHOLD_ITEMS.map((item) => {
           const active = isActive(item.href);
           return (
@@ -43,7 +46,7 @@ export function HouseholdNav({
               key={item.label}
               href={`${base}${item.href}`}
               aria-current={active ? "page" : undefined}
-              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+              className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition sm:px-4 ${
                 active
                   ? "border-emerald-600 text-emerald-700"
                   : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-900"
@@ -59,8 +62,8 @@ export function HouseholdNav({
         // Member views are a different altitude from the household views
         // above — same household, one person's slice of it — so they get
         // their own row rather than extending that tab strip.
-        <div className="flex flex-wrap items-center gap-2 pb-3 pt-1">
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Members</span>
+        <div className="no-scrollbar -mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-2.5 pt-1.5 sm:mx-0 sm:flex-wrap sm:px-0 sm:pb-3">
+          <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-slate-400">Members</span>
           {members.map((m) => {
             const active = isActive(`/m/${m.id}`);
             return (
@@ -68,7 +71,7 @@ export function HouseholdNav({
                 key={m.id}
                 href={`${base}/m/${m.id}`}
                 aria-current={active ? "page" : undefined}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium transition ${
                   active
                     ? "bg-emerald-600 text-white"
                     : m.active
