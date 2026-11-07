@@ -38,12 +38,15 @@ export async function POST(request: Request): Promise<Response> {
   // and without it a 503 is indistinguishable from "set but not
   // redeployed", which is the failure people actually hit, since Vercel
   // bakes env vars in at build time.
-  const missing = [
-    !token && "TELEGRAM_BOT_TOKEN",
-    !secret && "TELEGRAM_WEBHOOK_SECRET",
-  ].filter(Boolean) as string[];
+  // Written as an explicit !token || !secret check rather than testing
+  // the array's length: TypeScript narrows on the former, so `token` and
+  // `secret` are plain strings below this block.
+  if (!token || !secret) {
+    const missing = [
+      !token && "TELEGRAM_BOT_TOKEN",
+      !secret && "TELEGRAM_WEBHOOK_SECRET",
+    ].filter(Boolean) as string[];
 
-  if (missing.length > 0) {
     console.error(`telegram webhook: not configured — missing ${missing.join(", ")}`);
     return new Response(
       `Bot not configured. Missing on this deployment: ${missing.join(", ")}. ` +
