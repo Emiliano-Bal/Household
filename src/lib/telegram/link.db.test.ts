@@ -23,8 +23,12 @@ import { loadSession, saveSession, clearSession, clearExpiredSessions, nextStep 
 
 // Far outside the range real Telegram ids occupy for these tests, and
 // above 2^31 so the BigInt column is actually exercised.
-let nextId = 9_000_000_001n;
-const freshTelegramId = () => nextId++;
+let nextId = BigInt("9000000001");
+const freshTelegramId = () => {
+  const id = nextId;
+  nextId = nextId + BigInt(1);
+  return id;
+};
 
 describe("telegram linking (real DB)", () => {
   let householdId: string;
@@ -50,7 +54,7 @@ describe("telegram linking (real DB)", () => {
     // Links and attempts are per-test state; codes cascade with members.
     await prisma.telegramLink.deleteMany({ where: { memberId: { in: [aliceId, bobId] } } });
     await prisma.telegramLinkCode.deleteMany({ where: { memberId: { in: [aliceId, bobId] } } });
-    await prisma.telegramLinkAttempt.deleteMany({ where: { telegramUserId: { gte: 9_000_000_000n } } });
+    await prisma.telegramLinkAttempt.deleteMany({ where: { telegramUserId: { gte: BigInt("9000000000") } } });
   });
 
   it("mints a code from an unambiguous alphabet with a short expiry", async () => {
@@ -192,8 +196,8 @@ describe("telegram linking (real DB)", () => {
 });
 
 describe("telegram sessions (real DB)", () => {
-  const chatId = 9_100_000_001n;
-  const telegramUserId = 9_100_000_002n;
+  const chatId = BigInt("9100000001");
+  const telegramUserId = BigInt("9100000002");
 
   afterAll(async () => {
     await prisma.telegramSession.deleteMany({ where: { chatId } });

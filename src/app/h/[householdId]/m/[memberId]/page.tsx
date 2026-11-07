@@ -4,6 +4,7 @@ import { getMemberDashboardData } from "@/lib/queries";
 import { describeBalance, formatCents, formatPercent } from "@/lib/money";
 import { monthStart, monthKey } from "@/lib/month";
 import { MonthNav } from "@/components/month-nav";
+import { TelegramLink } from "@/components/telegram-link";
 
 function parseMonth(value: string | undefined): Date {
   if (!value) return monthStart(new Date());
@@ -28,7 +29,7 @@ export default async function MemberPage({
   const data = await getMemberDashboardData(householdId, memberId, month);
   if (!data) notFound();
 
-  const { member, summary, shareByKind, incomeRecords, shares, paidWithoutShare, settlements, savingsContributions } = data;
+  const { member, telegramLinkedAt, summary, shareByKind, incomeRecords, shares, paidWithoutShare, settlements, savingsContributions } = data;
   const monthStr = monthKey(month);
 
   // A non-zero resolved income with no rows for this month means
@@ -230,6 +231,13 @@ export default async function MemberPage({
           </ul>
         </section>
       )}
+
+      <TelegramLink
+        householdId={householdId}
+        memberId={member.id}
+        memberName={member.name}
+        linkedAt={telegramLinkedAt}
+      />
 
       <section className="rounded-lg border border-slate-200 bg-white">
         <h2 className="border-b border-slate-200 px-5 py-3 text-sm font-medium uppercase tracking-wide text-slate-400">

@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "./db";
 import { createExpenseRecord, membersAndIncomeFor } from "./expense-service";
+import { createLinkCode, unlinkMember } from "./telegram/link";
 import { monthStart, addMonths } from "./month";
 import { buildStoredIncomeRatioSnapshot, computeExpenseShares, previewSettlement, type SplitRule } from "./splitting";
 import { computeHouseholdBalancesMap } from "./queries";
@@ -685,4 +686,35 @@ export async function setBudgetLimit(input: z.infer<typeof setBudgetLimitSchema>
   revalidatePath(`/h/${data.householdId}/expenses/budget`);
   revalidatePath(`/h/${data.householdId}`);
   return { ok: true as const, limit };
+}
+
+// --- Telegram linking ----------------------------------------------------
+
+/**
+ * Mint a one-time code for a member to redeem with /link in the bot.
+ *
+ * Scoped to the household so a member id from a URL cannot be used to
+ * mint a code for someone else's household. That is the only check
+ * available: the web app has no login, so anyone who can open the
+ * household page can mint a code for any of its members. See AUTH_TODO.md.
+ */
+export async function generateTelegramLinkCode(householdId: string, memberId: string) {
+  const member = await prisma.member.findFirst({ where: { id: memberId, householdId }, select: { id: true } });
+  if (!member) return { ok: false as const, error: "Ese miembro no pertenece a este hogar." };
+
+  const existing = await prisma.telegramLink.findUnique({ where: { memberId }, select: { id: true } });
+  if (existing) return { ok: false as const, error: "Este miembro ya tiene Telegram vinculado." };
+
+  const { code, expiresAt } = await createLinkCode(memberId);
+  revalidatePath(`/h/${householdId}/m/${memberId}`);
+  return { ok: true as const, code, expiresAt };
+}
+
+export async function unlinkTelegramFromMember(householdId: string, memberId: string) {
+  const member = await prisma.member.findFirst({ where: { id: memberId, householdId }, select: { id: true } });
+  if (!member) return { ok: false as const, error: "Ese miembro no pertenece a este hogar." };
+
+  const removed = await unlinkMember(memberId);
+  revalidatePath(`/h/${householdId}/m/${memberId}`);
+  return { ok: true as const, removed };
 }

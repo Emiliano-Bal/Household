@@ -315,6 +315,8 @@ export function getDashboardData(householdId: string, month: Date): Promise<Dash
 
 export interface MemberDashboardData {
   member: { id: string; name: string; email: string | null; active: boolean };
+  /** When this member's Telegram account was linked, or null if none is. */
+  telegramLinkedAt: Date | null;
   month: Date;
   /** This member's row out of getDashboardData().perMember — same numbers the household Dashboard shows, not a second derivation of them. */
   summary: DashboardData["perMember"][number];
@@ -359,7 +361,7 @@ export async function getMemberDashboardData(
 
   const member = await prisma.member.findFirst({
     where: { id: memberId, householdId },
-    select: { id: true, name: true, email: true, active: true },
+    select: { id: true, name: true, email: true, active: true, telegramLink: { select: { createdAt: true } } },
   });
   if (!member) return null;
 
@@ -453,8 +455,11 @@ export async function getMemberDashboardData(
     }
   }
 
+  const { telegramLink, ...memberFields } = member;
+
   return {
-    member,
+    member: memberFields,
+    telegramLinkedAt: telegramLink?.createdAt ?? null,
     month: start,
     summary,
     shareByKind,
