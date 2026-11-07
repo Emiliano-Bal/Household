@@ -3,6 +3,7 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "./db";
+import { createExpenseRecord, membersAndIncomeFor } from "./expense-service";
 import { monthStart, addMonths } from "./month";
 import { buildStoredIncomeRatioSnapshot, computeExpenseShares, previewSettlement, type SplitRule } from "./splitting";
 import { computeHouseholdBalancesMap } from "./queries";
@@ -27,16 +28,6 @@ import { z } from "zod";
 /** The pure impact plus the member name, which every caller needs to render it. */
 export type ExpenseChangeImpact = BaseExpenseChangeImpact & { memberName: string };
 
-async function membersAndIncomeFor(householdId: string) {
-  const [members, incomeRecords] = await Promise.all([
-    prisma.member.findMany({ where: { householdId } }),
-    prisma.incomeRecord.findMany({ where: { member: { householdId } } }),
-  ]);
-  return {
-    members: members.map((m) => ({ id: m.id, active: m.active })),
-    incomeRecords: incomeRecords.map((r) => ({ memberId: r.memberId, month: r.month, netAmount: r.netAmount })),
-  };
-}
 
 // --- Household / members -----------------------------------------------
 
@@ -110,28 +101,11 @@ export async function updateCategory(
 // --- Expenses -------------------------------------------------------------
 
 export async function createExpense(input: z.infer<typeof createExpenseSchema>) {
-  const data = createExpenseSchema.parse(input);
-  const { members, incomeRecords } = await membersAndIncomeFor(data.householdId);
-
-  const shareResult = computeExpenseShares(data.amount, data.paidByMemberId, data.splitRule, members, incomeRecords, data.date);
-  const storedSnapshot = buildStoredIncomeRatioSnapshot(shareResult);
-
-  const expense = await prisma.expense.create({
-    data: {
-      householdId: data.householdId,
-      date: data.date,
-      label: data.label,
-      amount: data.amount,
-      categoryId: data.categoryId,
-      paidByMemberId: data.paidByMemberId,
-      splitRule: data.splitRule satisfies SplitRule,
-      isShared: data.isShared,
-      incomeRatioSnapshot: (storedSnapshot as Prisma.InputJsonValue | null) ?? Prisma.JsonNull,
-      shares: { create: shareResult.shares.map((s) => ({ memberId: s.memberId, owedAmount: s.owedAmount })) },
-    },
-  });
-
-  revalidatePath(`/h/${data.householdId}`);
+  // The write itself lives in expense-service so the Telegram webhook can
+  // reuse it without importing this "use server" module. Revalidation
+  // stays here: it is a concern of the web app's cache, not of the write.
+  const expense = await createExpenseRecord(input);
+  revalidatePath(`/h/${expense.householdId}`);
   return expense;
 }
 
