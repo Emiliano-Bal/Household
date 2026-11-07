@@ -319,6 +319,85 @@ spreadsheet formula.
 This export is lossy by design — it is a record of what happened, not a
 restorable database. For an actual restore, use the pg_dump above.
 
+## Telegram bot
+
+Logs expenses from a Telegram chat. Webhook-driven (no polling), served
+by `/api/telegram`.
+
+### Environment variables
+
+| Name | Where | Notes |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | Vercel, **per environment** | A different bot for Production and for Preview — see below |
+| `TELEGRAM_WEBHOOK_SECRET` | Vercel, per environment | `openssl rand -hex 32`. 1-256 chars of `A-Za-z0-9_-` only |
+
+With either unset the route returns 503 rather than running
+half-configured: without the secret the endpoint would accept anything
+that can POST JSON, and it writes expenses.
+
+### One bot per environment, not per deployment
+
+**A bot token can hold exactly one webhook.** Pointing the production
+bot at a preview URL silently breaks production. So:
+
+- Production bot → the production domain, registered once.
+- A second bot (from @BotFather) for preview/dev.
+- Set `TELEGRAM_BOT_TOKEN` separately for Production and Preview in
+  Vercel so each deployment talks to its own bot.
+
+Preview deployments get a fresh URL per commit, so a preview bot has to
+be re-pointed whenever you want it to follow a specific deployment.
+
+### Registering the webhook
+
+```bash
+# Production
+scripts/telegram-webhook.sh set "$PROD_BOT_TOKEN" https://household-ebon.vercel.app "$TELEGRAM_WEBHOOK_SECRET"
+
+# A specific preview deployment, using the preview bot
+scripts/telegram-webhook.sh set "$PREVIEW_BOT_TOKEN" https://household-git-branch-you.vercel.app "$PREVIEW_SECRET"
+
+# Check what is registered, including the last delivery error
+scripts/telegram-webhook.sh info "$PROD_BOT_TOKEN"
+
+# Stop delivery
+scripts/telegram-webhook.sh delete "$PROD_BOT_TOKEN"
+```
+
+The equivalent raw call, if you would rather not use the script:
+
+```bash
+curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+  --data-urlencode "url=https://<your-domain>/api/telegram" \
+  --data-urlencode "secret_token=<TELEGRAM_WEBHOOK_SECRET>" \
+  --data-urlencode 'allowed_updates=["message","callback_query"]'
+```
+
+`getWebhookInfo` is the first thing to check when the bot goes quiet —
+it reports `last_error_message`, which is usually a 401 (secret
+mismatch) or a 503 (env vars missing on that environment).
+
+### Linking an account
+
+There is no login in this app, so a Telegram account links to a
+**member**, not a user. On the member's page: **Generate link code**,
+then send the bot `/link ABCD2345`. Codes are single-use, expire after
+15 minutes, and minting a new one kills the previous one. Failed
+attempts are capped at 5 per hour per Telegram account.
+
+Disconnect from the same place, or with `/desvincular` in the chat.
+
+**The code is only as secret as the household URL it was shown on** —
+anyone who can open that page can mint one. See `AUTH_TODO.md`.
+
+### Commands
+
+`/gasto` start an expense · `/cancelar` abandon it · `/ultimos` last five
+expenses · `/link <code>` connect · `/desvincular` disconnect
+
+Or send one line: `45,20 Mercadona` — the bot takes the amount and
+title, then asks only for category and split.
+
 ## Troubleshooting quick reference
 
 - **Migration hangs, then `connect ETIMEDOUT` / `ENETUNREACH` against
@@ -338,6 +417,14 @@ restorable database. For an actual restore, use the pg_dump above.
 - **"too many connections" under load** → confirms you accidentally put the
   direct (5432) string in Vercel's `DATABASE_URL` instead of the pooled one;
   swap it for the 6543 transaction-pooler string.
+- **The bot stops replying** → `scripts/telegram-webhook.sh info <token>`.
+  A 401 in `last_error_message` means the secret in Vercel and the one
+  registered with Telegram have drifted apart; a 503 means
+  `TELEGRAM_BOT_TOKEN` or `TELEGRAM_WEBHOOK_SECRET` is missing on that
+  environment. Re-register after changing either.
+- **The bot answers in preview but not production (or vice versa)** →
+  one token, one webhook. Whichever URL was registered last is the only
+  one receiving updates. Use a separate bot per environment.
 - **"prepared statement ... already exists"** → shouldn't happen with
   `@prisma/adapter-pg`, see step 1's note; if it ever does, it means
   something in the stack started using named prepared statements against
