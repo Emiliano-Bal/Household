@@ -32,9 +32,24 @@ export async function POST(request: Request): Promise<Response> {
 
   // Refuse to run half-configured. Without the secret the endpoint would
   // accept anything that can POST JSON, and this endpoint writes money.
-  if (!token || !secret) {
-    console.error("telegram webhook: TELEGRAM_BOT_TOKEN or TELEGRAM_WEBHOOK_SECRET is not set");
-    return new Response("Bot not configured", { status: 503 });
+  //
+  // The response names which variables are missing. That is config state,
+  // not a secret — the names are already in .env.example and DEPLOY.md —
+  // and without it a 503 is indistinguishable from "set but not
+  // redeployed", which is the failure people actually hit, since Vercel
+  // bakes env vars in at build time.
+  const missing = [
+    !token && "TELEGRAM_BOT_TOKEN",
+    !secret && "TELEGRAM_WEBHOOK_SECRET",
+  ].filter(Boolean) as string[];
+
+  if (missing.length > 0) {
+    console.error(`telegram webhook: not configured — missing ${missing.join(", ")}`);
+    return new Response(
+      `Bot not configured. Missing on this deployment: ${missing.join(", ")}. ` +
+        "Set them in Vercel for this environment, then REDEPLOY — env vars are applied at build time.",
+      { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } }
+    );
   }
 
   if (!secretMatches(request.headers.get("x-telegram-bot-api-secret-token"), secret)) {
