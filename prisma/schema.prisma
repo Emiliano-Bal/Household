@@ -68,6 +68,8 @@ model Member {
   savingsContributions  SavingsContribution[]
   settlementsFrom       Settlement[]          @relation("SettlementFrom")
   settlementsTo         Settlement[]          @relation("SettlementTo")
+  telegramLink          TelegramLink?
+  telegramLinkCodes     TelegramLinkCode[]
 
   @@index([householdId])
 }
@@ -288,4 +290,69 @@ model Settlement {
   note         String?
 
   @@index([householdId])
+}
+
+// --- Telegram bot -------------------------------------------------------
+//
+// There is no user table in this app, so a Telegram account links to a
+// MEMBER: that is what identifies a person, and it carries the household
+// and the payer id an expense needs.
+//
+// Telegram ids are BigInt on purpose — user and chat ids outgrew 2^31.
+
+/// A short-lived, single-use code minted in the web app and redeemed with
+/// /link in the bot. Single-use and expiring because the web app has no
+/// login: a code is only as secret as the household URL it was shown on,
+/// so it must stop being useful quickly.
+model TelegramLinkCode {
+  /// 8 characters from an unambiguous alphabet (no I/L/O/U/0/1).
+  code      String    @id
+  memberId  String
+  member    Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  /// Set on redemption; a non-null value makes the code dead.
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([memberId])
+  @@index([expiresAt])
+}
+
+/// One Telegram account to one member, both ways: a person cannot drive
+/// two members from one account, and a member cannot be driven by two
+/// accounts.
+model TelegramLink {
+  id             String   @id @default(cuid())
+  telegramUserId BigInt   @unique
+  memberId       String   @unique
+  member         Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+}
+
+/// Serverless has no memory between requests, so the multi-step expense
+/// flow lives here. Keyed by chat rather than user: the same person in a
+/// private chat and a group is two conversations.
+model TelegramSession {
+  chatId         BigInt   @id
+  telegramUserId BigInt
+  /// Which question the flow is waiting on — see src/lib/telegram/session.ts.
+  step           String
+  /// The partially built expense.
+  draft          Json
+  updatedAt      DateTime @updatedAt
+
+  /// Lets the sweeper find stale rows; sessions are treated as expired
+  /// after 30 minutes of inactivity.
+  @@index([updatedAt])
+}
+
+/// Throttles /link so an 8-character code cannot be guessed by repetition.
+/// Rows are evidence, not state: failures in the last hour are counted.
+model TelegramLinkAttempt {
+  id             String   @id @default(cuid())
+  telegramUserId BigInt
+  succeeded      Boolean
+  createdAt      DateTime @default(now())
+
+  @@index([telegramUserId, createdAt])
 }
